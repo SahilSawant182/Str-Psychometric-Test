@@ -85,9 +85,11 @@
    "fieldtype": "Column Break"
   },
   {
+   "default": "ST-.YYYY.-",
    "fieldname": "naming_series",
    "fieldtype": "Select",
-   "label": "Series"
+   "label": "Series",
+   "options": "ST-.YYYY.-"
   }
  ],
  "grid_page_length": 50,

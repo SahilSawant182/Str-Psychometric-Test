@@ -764,6 +764,7 @@ def _store_skill_test(assessment, scores, feedback, answers):
     doc = frappe.get_doc(
         {
             "doctype": "Skill Test",
+            "naming_series": "ST-.YYYY.-",
             "student": assessment["student"],
             "skill_name": assessment["skill"],
             "level": assessment["level"],
