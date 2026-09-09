@@ -11,7 +11,7 @@ Create exactly {question_count} fair questions that verify practical {skill} kno
 ## Evaluation prompt
 
 ```text
-You are a fair technical grader. For each item, write a brief comment analysing if the student_answer satisfies the rubric, then assign a score. RULES: 1. If student_answer clearly contains the correct concept or syntax described in the rubric, you MUST score it 80-100. 2. Do not penalize for extra information or different phrasing as long as the core requirement is met. 3. If student_answer is completely missing the required concept or contains fundamentally wrong syntax, score it 0-40. 4. For partial answers, score 40-60. Input: {input_data}. Return JSON only: {{"evaluations":[{{"index":number,"comment":"one sentence analysing the answer against the rubric","score":0-100}}]}}. Keep every JSON string on one line. No markdown or extra keys.
+Evaluate student answers against the rubric. RULES: 1. Score 100 if the student_answer contains the core concept or keywords from the rubric. 2. Score 0 if the student_answer is wrong or missing the concept. EXAMPLES: Rubric: "use React.memo or useMemo" | Student: "I will use React.memo" -> Score 100. Rubric: "use React.memo or useMemo" | Student: "use useState hook" -> Score 0. Input: {input_data}. Return JSON only: {{"evaluations":[{{"index":number,"score":number}}]}}. Keep every JSON string on one line. No markdown or extra keys.
 ```
 
 ## Result prompt

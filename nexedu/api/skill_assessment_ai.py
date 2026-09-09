@@ -169,7 +169,7 @@ def _ollama_chat(prompt, system="JSON only.", max_tokens=1200):
             "stream": False,
             "think": False,
             "format": "json",
-            "options": {"temperature": 0.0, "num_predict": max_tokens},
+            "options": {"temperature": 0.1, "num_predict": max_tokens},
         }
     ).encode("utf-8")
     api_request = request.Request(
@@ -714,40 +714,23 @@ def _result_feedback(assessment, scores):
         question["question"] for question, result in zip(questions, scores["breakdown"]) if not result["is_correct"]
     ) or "none"
 
-    # For pure MCQ tests (e.g. Beginner), scores are fully deterministic.
-    # Skip the LLM call entirely and build feedback instantly.
-    has_descriptive = any(q.get("type") != "mcq" for q in questions)
-    if not has_descriptive:
-        skill = _skill_prompt_name(assessment["skill"], assessment["level"])
-        passed = scores["passed"]
-        feedback = {
-            "summary": "You scored {score}% on the {skill} quiz.".format(
-                score=scores["score"], skill=skill
-            ),
-            "strengths": [correct_topics] if correct_topics != "none" else [],
-            "gaps": [missed_topics] if missed_topics != "none" else [],
-            "next_step": (
-                "Well done! Move on to the next level."
-                if passed
-                else "Review the missed topics and try again."
-            ),
-            "status": "verified" if passed else "not_verified",
-        }
-        return feedback
-
-    # Has descriptive questions — use LLM for meaningful qualitative feedback
-    prompt = _fill_prompt(
-        _prompt_section("Result prompt"),
-        skill=_skill_prompt_name(assessment["skill"], assessment["level"]),
-        score=scores["score"],
-        correct=scores["total_correct"],
-        total=scores["total_questions"],
-        passed=str(scores["passed"]).lower(),
-        correct_topics=correct_topics,
-        missed_topics=missed_topics,
-    )
-    feedback = _parse_json(_llm_chat(prompt, max_tokens=450))
-    feedback["status"] = "verified" if scores["passed"] else "not_verified"
+    # Fully deterministic programmatic feedback — ZERO LLM CALLS
+    # This cuts verification time in half.
+    skill = _skill_prompt_name(assessment["skill"], assessment["level"])
+    passed = scores["passed"]
+    feedback = {
+        "summary": "You scored {score}% on the {skill} quiz.".format(
+            score=scores["score"], skill=skill
+        ),
+        "strengths": [correct_topics] if correct_topics != "none" else [],
+        "gaps": [missed_topics] if missed_topics != "none" else [],
+        "next_step": (
+            "Well done! Move on to the next level."
+            if passed
+            else "Review the missed topics and try again."
+        ),
+        "status": "verified" if passed else "not_verified",
+    }
     return feedback
 
 
