@@ -599,7 +599,7 @@ def _evaluate_written_answers(assessment, descriptive_items):
         raw = _llm_chat(prompt, max_tokens=1000)
         data = _parse_json(raw)
         evals = data.get("evaluations") or []
-        
+
         results = {}
         for ev in evals:
             idx = ev.get("index")
@@ -608,7 +608,36 @@ def _evaluate_written_answers(assessment, descriptive_items):
             is_correct = ev.get("is_correct")
             if isinstance(is_correct, str):
                 is_correct = is_correct.strip().lower() == "true"
-            
+
+            # Second-pass verification: ONLY for problem_solving questions (code/syntax).
+            # For short_answer / long_answer (definitions, explanations, applications),
+            # the student may phrase their answer differently but still be correct — we
+            # trust the first-pass evaluation for those types.
+            if (score >= PASS_SCORE or bool(is_correct)):
+                item_match = next((it for it in descriptive_items if it["index"] == idx), None)
+                if item_match and item_match.get("type") == "problem_solving":
+                    student_ans = item_match["selected"]
+                    rubric = item_match.get("rubric") or ""
+                    verify_prompt = (
+                        "You are a strict factual checker for code and technical syntax. "
+                        "Read the student's EXACT answer below and the rubric requirement. "
+                        "Judge ONLY what is explicitly written in the student's answer — do NOT infer, assume, or imagine anything not present. "
+                        "Student's exact answer: \"{student_ans}\". "
+                        "Rubric requirement: \"{rubric}\". "
+                        "Does the student's exact answer satisfy the rubric? "
+                        "Reply with JSON only: {{\"verified\": true or false, \"reason\": \"one short sentence\"}}"
+                    ).format(student_ans=student_ans, rubric=rubric)
+                    try:
+                        verify_raw = _llm_chat(verify_prompt, max_tokens=200)
+                        verify_data = _parse_json(verify_raw)
+                        if not bool(verify_data.get("verified", True)):
+                            score = 0.0
+                            is_correct = False
+                            ev["comment"] = verify_data.get("reason", "Answer did not satisfy rubric on verification.")
+                    except Exception:
+                        pass  # If verification call fails, trust original evaluation
+
+
             # If the student's answer is correct up to PASS_SCORE (60.0%), they receive full marks (100.0).
             if score >= PASS_SCORE or bool(is_correct):
                 final_score = 100.0
@@ -633,6 +662,7 @@ def _evaluate_written_answers(assessment, descriptive_items):
                 "evaluation_comment": "Evaluation failed: {0}".format(exc),
             }
         return results
+
 
 
 def _score_questions(assessment, answers):
@@ -712,6 +742,29 @@ def _result_feedback(assessment, scores):
     missed_topics = "; ".join(
         question["question"] for question, result in zip(questions, scores["breakdown"]) if not result["is_correct"]
     ) or "none"
+
+    # For pure MCQ tests (e.g. Beginner), scores are fully deterministic.
+    # Skip the LLM call entirely and build feedback instantly.
+    has_descriptive = any(q.get("type") != "mcq" for q in questions)
+    if not has_descriptive:
+        skill = _skill_prompt_name(assessment["skill"], assessment["level"])
+        passed = scores["passed"]
+        feedback = {
+            "summary": "You scored {score}% on the {skill} quiz.".format(
+                score=scores["score"], skill=skill
+            ),
+            "strengths": [correct_topics] if correct_topics != "none" else [],
+            "gaps": [missed_topics] if missed_topics != "none" else [],
+            "next_step": (
+                "Well done! Move on to the next level."
+                if passed
+                else "Review the missed topics and try again."
+            ),
+            "status": "verified" if passed else "not_verified",
+        }
+        return feedback
+
+    # Has descriptive questions — use LLM for meaningful qualitative feedback
     prompt = _fill_prompt(
         _prompt_section("Result prompt"),
         skill=_skill_prompt_name(assessment["skill"], assessment["level"]),
@@ -725,6 +778,7 @@ def _result_feedback(assessment, scores):
     feedback = _parse_json(_llm_chat(prompt, max_tokens=450))
     feedback["status"] = "verified" if scores["passed"] else "not_verified"
     return feedback
+
 
 
 def _student_exists(student):
