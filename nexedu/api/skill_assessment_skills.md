@@ -5,7 +5,7 @@
 ## Quiz prompt
 
 ```text
-Create exactly {question_count} fair questions that verify practical {skill} knowledge for a {level} learner. {mix_instruction} Match difficulty to this level. Cover distinct essentials. Keep all questions, options, and rubrics extremely concise and brief to minimize generation time. Rubrics must be a single, short sentence of under 10 words. Return JSON only: {"questions":[{"type":"mcq|short_answer|long_answer|problem_solving","q":"...","o":["...","...","...","..."],"a":"A","rubric":"what a correct written answer must include","d":"easy|medium|hard"}]}. For mcq, include o and a where a is A-D. For non-mcq, set o to [] and a to "" and include a concise rubric. Keep every JSON string on one line with no raw line breaks or tab characters. No markdown or extra keys.
+Create exactly {question_count} fair questions that verify practical {skill} knowledge for a {level} learner. {mix_instruction} Match difficulty to this level. Cover distinct essentials. Keep all questions, options, and rubrics extremely concise and brief to minimize generation time. For mcq, ensure all 4 options in 'o' are completely distinct and mutually exclusive with no duplicates. Rubrics must be a single, short sentence of under 10 words. Return JSON only: {"questions":[{"type":"mcq|short_answer|long_answer|problem_solving","q":"...","o":["...","...","...","..."],"a":"A","rubric":"what a correct written answer must include","d":"easy|medium|hard"}]}. For mcq, include o and a where a is A-D. For non-mcq, set o to [] and a to "" and include a concise rubric. Keep every JSON string on one line with no raw line breaks or tab characters. No markdown or extra keys.
 ```
 
 ## Evaluation prompt

@@ -23,7 +23,7 @@ doctype_js = {
 # Scheduled Tasks
 scheduler_events = {
     "all": [
-        # "nexedu.api.skill_assessment_ai.enqueue_prepopulate_cache"
+        "nexedu.api.skill_assessment_ai.enqueue_prepopulate_cache"
     ],
     "daily": [
         "nexedu.habits_builder.tasks.check_broken_streaks",         # Detect streak breaks overnight
@@ -48,6 +48,9 @@ fixtures = [
     {
         "doctype": "Custom Field",
         "filters": [["dt", "in", ["Student Profile"]]]
+    },
+    {
+        "doctype": "Skill Assessment Cache"
     }
 ]
  

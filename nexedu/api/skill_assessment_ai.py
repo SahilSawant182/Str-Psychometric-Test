@@ -430,6 +430,15 @@ def _normalise_questions(data):
             raise ValueError("Model returned an invalid question at index {0}".format(index))
         if question_type == "mcq" and (len(options) != 4 or not answer):
             raise ValueError("Model returned an invalid MCQ at index {0}".format(index))
+        if question_type == "mcq":
+            cleaned_opts = []
+            for opt in options:
+                opt_str = str(opt).strip().lower()
+                if len(opt_str) > 1 and opt_str[0] in "abcd" and opt_str[1] in {".", ")", " ", "-", ":"}:
+                    opt_str = opt_str[2:].strip()
+                cleaned_opts.append(opt_str)
+            if len(set(cleaned_opts)) < len(options):
+                raise ValueError("Model returned duplicate MCQ options at index {0}".format(index))
         if question_type != "mcq" and not str(rubric).strip():
             rubric = str(raw_answer).strip() or (
                 "Evaluate technical correctness, completeness, reasoning, and practical relevance "
