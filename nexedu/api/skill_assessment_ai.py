@@ -169,7 +169,7 @@ def _ollama_chat(prompt, system="JSON only.", max_tokens=1200):
             "stream": False,
             "think": False,
             "format": "json",
-            "options": {"temperature": 0.2, "num_predict": max_tokens},
+            "options": {"temperature": 0.0, "num_predict": max_tokens},
         }
     ).encode("utf-8")
     api_request = request.Request(
@@ -596,7 +596,7 @@ def _evaluate_written_answers(assessment, descriptive_items):
     )
 
     try:
-        raw = _llm_chat(prompt, max_tokens=1000)
+        raw = _llm_chat(prompt, max_tokens=1500)
         data = _parse_json(raw)
         evals = data.get("evaluations") or []
 
@@ -605,41 +605,11 @@ def _evaluate_written_answers(assessment, descriptive_items):
             idx = ev.get("index")
             score = float(ev.get("score", 0) or 0)
             score = max(0, min(100, score))
-            is_correct = ev.get("is_correct")
-            if isinstance(is_correct, str):
-                is_correct = is_correct.strip().lower() == "true"
 
-            # Second-pass verification: ONLY for problem_solving questions (code/syntax).
-            # For short_answer / long_answer (definitions, explanations, applications),
-            # the student may phrase their answer differently but still be correct — we
-            # trust the first-pass evaluation for those types.
-            if (score >= PASS_SCORE or bool(is_correct)):
-                item_match = next((it for it in descriptive_items if it["index"] == idx), None)
-                if item_match and item_match.get("type") == "problem_solving":
-                    student_ans = item_match["selected"]
-                    rubric = item_match.get("rubric") or ""
-                    verify_prompt = (
-                        "You are a strict factual checker for code and technical syntax. "
-                        "Read the student's EXACT answer below and the rubric requirement. "
-                        "Judge ONLY what is explicitly written in the student's answer — do NOT infer, assume, or imagine anything not present. "
-                        "Student's exact answer: \"{student_ans}\". "
-                        "Rubric requirement: \"{rubric}\". "
-                        "Does the student's exact answer satisfy the rubric? "
-                        "Reply with JSON only: {{\"verified\": true or false, \"reason\": \"one short sentence\"}}"
-                    ).format(student_ans=student_ans, rubric=rubric)
-                    try:
-                        verify_raw = _llm_chat(verify_prompt, max_tokens=200)
-                        verify_data = _parse_json(verify_raw)
-                        if not bool(verify_data.get("verified", True)):
-                            score = 0.0
-                            is_correct = False
-                            ev["comment"] = verify_data.get("reason", "Answer did not satisfy rubric on verification.")
-                    except Exception:
-                        pass  # If verification call fails, trust original evaluation
-
-
-            # If the student's answer is correct up to PASS_SCORE (60.0%), they receive full marks (100.0).
-            if score >= PASS_SCORE or bool(is_correct):
+            # Use ONLY the numeric score as the source of truth.
+            # The LLM often contradicts itself by giving a low score but setting
+            # is_correct=true. We ignore is_correct entirely and trust the score.
+            if score >= PASS_SCORE:
                 final_score = 100.0
                 final_is_correct = True
             else:
@@ -662,6 +632,7 @@ def _evaluate_written_answers(assessment, descriptive_items):
                 "evaluation_comment": "Evaluation failed: {0}".format(exc),
             }
         return results
+
 
 
 

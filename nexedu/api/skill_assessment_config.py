@@ -23,7 +23,7 @@ QUESTION_COUNT = 5
 QUESTION_GENERATION_ATTEMPTS = 3
 QUESTION_MAX_TOKENS = 2200
 PASS_SCORE = 60
-REQUEST_TIMEOUT_SECONDS = 60   # Groq is fast; Ollama may need more
+REQUEST_TIMEOUT_SECONDS = 180   # Groq is fast; Ollama needs more time for generation
 
 # Convenience alias — whichever provider is active
 if LLM_PROVIDER == "omniroute":
