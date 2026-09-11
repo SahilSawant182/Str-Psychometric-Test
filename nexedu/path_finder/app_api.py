@@ -204,10 +204,9 @@ def get_career_path_pdf(student):
         "nexedu/templates/path_finder.html", context
     )
     frappe.logger().info(f"HTML length: {len(html)}")
-    pdf_content = get_pdf(html, {...})
-    frappe.logger().info(f"PDF length: {len(pdf_content) if pdf_content else 'None'}")
 
     pdf_content = get_pdf(html, {"orientation": "Portrait", "page-size": "A4"})
+    frappe.logger().info(f"PDF length: {len(pdf_content) if pdf_content else 'None'}")
 
     frappe.local.response.filename = f"career_path_{student}.pdf"
     frappe.local.response.filecontent = pdf_content

@@ -80,6 +80,13 @@ def get_student_dashboard(student: str) -> dict:
 
     plans = frappe.get_all("Habit Plan", filters={"student": student, "status": "Active"}, fields=["name"])
     for p in plans:
+        plan = frappe.get_doc("Habit Plan", p.name)
+
+        if plan.start_date and getdate(plan.start_date) > today_dt:
+            continue
+        if plan.end_date and getdate(plan.end_date) < today_dt:
+            continue
+
         habits = frappe.get_all("Habit", filters={"parent": p.name}, fields=["name", "frequency", "custom_days"])
         plan_due_today = 0
         plan_done_today = 0
@@ -737,9 +744,17 @@ def get_todays_pending_habits(student: str) -> list:
         if habit_name:
             already_logged.add(habit_name)
 
+    today_dt = getdate(today())
+
     pending = []
     for plan_ref in plans:
         plan = frappe.get_doc("Habit Plan", plan_ref.name)
+
+        if plan.start_date and getdate(plan.start_date) > today_dt:
+            continue
+        if plan.end_date and getdate(plan.end_date) < today_dt:
+            continue
+
         for row in plan.habits:
             if row.habit_name not in already_logged:
                 from nexedu.habits_builder.doctype.habit.habit import Habit as HabitDoc

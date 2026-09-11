@@ -25,6 +25,7 @@
 #  16. get_leaderboard                      (career_path, limit)
 #  17. get_student_dashboard                (student)
 #  18. recalculate_fit_scores               (student)
+#  19. get_completed_paths                   (student)
 # ─────────────────────────────────────────────────────────────────────────────
 
 import frappe
@@ -1450,3 +1451,113 @@ def delete_student_enrollment(enrollment):
         return {"status": "success"}
     else:
         frappe.throw("Only paused or generating enrollments can be deleted.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 20. GET COMPLETED PATHS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@frappe.whitelist(allow_guest=True)
+def get_completed_paths(student):
+    """
+    Returns all completed career path enrollments for a student,
+    with rich details for the frontend "View Completed Paths" section.
+
+    Params:
+        student : str  — the student email / ID
+
+    Returns:
+        completed_paths : list of dicts, each containing:
+            enrollment          : str   — Student Path Enrollment name
+            career_path         : str   — Career Path doctype name
+            path_name           : str   — display name of the career path
+            target_role         : str   — target job role
+            difficulty_level    : str   — Easy / Moderate / Hard
+            estimated_duration_months : int
+            enrolled_at         : str   — ISO date when student enrolled
+            completed_at        : str   — ISO date when path was completed
+            completion_percent  : float — should be 100 for completed paths
+            total_milestones    : int   — total milestone count
+            prereq_count        : int   — prerequisite milestones
+            core_count          : int   — non-prerequisite milestones
+            skills_acquired     : list  — [{skill, level}] skills from the path
+            total_duration_days : int   — number of days from enrolled_at to completed_at
+        total_completed     : int   — how many paths this student has fully completed
+    """
+    enrollments = frappe.get_all(
+        "Student Path Enrollment",
+        filters={"student": student, "status": "Completed"},
+        fields=[
+            "name", "career_path", "status", "completion_percent",
+            "skill_match_percent", "enrolled_at", "current_milestone_order",
+        ],
+        order_by="modified desc",
+    )
+
+    completed_paths = []
+
+    for e in enrollments:
+        # ── Career Path metadata 
+        cp_fields = frappe.db.get_value(
+            "Career Path", e.career_path,
+            [
+                "path_name", "target_role",
+                "difficulty_level", "estimated_duration_months",
+            ],
+            as_dict=True,
+        ) or {}
+
+        # ── Enrollment document for child tables 
+        enr_doc = frappe.get_doc("Student Path Enrollment", e.name)
+        milestones = enr_doc.milestone_progress
+
+        total_milestones = len(milestones)
+        prereq_count     = sum(1 for r in milestones if getattr(r, "is_prereq", 0))
+        core_count       = total_milestones - prereq_count
+
+        # ── Completion date: latest completed_at across milestones ────────
+        completed_dates = [
+            r.completed_at for r in milestones
+            if r.status == "Completed" and r.completed_at
+        ]
+        completed_at = max(completed_dates) if completed_dates else enr_doc.modified
+
+        # ── Duration in days ──────────────────────────────────────────────
+        total_duration_days = 0
+        if e.enrolled_at and completed_at:
+            from frappe.utils import date_diff, getdate
+            total_duration_days = date_diff(getdate(completed_at), getdate(e.enrolled_at))
+
+        # ── Skills acquired from milestones ───────────────────────────────
+        skills_acquired = []
+        seen_skills = set()
+        for r in milestones:
+            skill = getattr(r, "skill", None)
+            if skill and skill not in seen_skills:
+                seen_skills.add(skill)
+                skills_acquired.append({
+                    "skill": skill,
+                    "level": getattr(r, "required_skill_level", "Beginner"),
+                })
+
+        completed_paths.append({
+            "enrollment"              : e.name,
+            "career_path"             : e.career_path,
+            "path_name"               : cp_fields.get("path_name") or e.career_path,
+            "target_role"             : cp_fields.get("target_role") or e.career_path,
+            "difficulty_level"        : cp_fields.get("difficulty_level") or "Moderate",
+            "estimated_duration_months": cp_fields.get("estimated_duration_months") or 0,
+            "enrolled_at"             : str(e.enrolled_at) if e.enrolled_at else None,
+            "completed_at"            : str(completed_at) if completed_at else None,
+            "completion_percent"      : e.completion_percent or 100,
+            "total_milestones"        : total_milestones,
+            "prereq_count"            : prereq_count,
+            "core_count"              : core_count,
+            "skills_acquired"         : skills_acquired,
+            "total_duration_days"     : total_duration_days,
+        })
+
+    return {
+        "completed_paths": completed_paths,
+        "total_completed" : len(completed_paths),
+    }
