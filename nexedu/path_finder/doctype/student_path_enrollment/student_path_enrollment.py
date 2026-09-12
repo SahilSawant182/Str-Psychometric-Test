@@ -77,6 +77,8 @@ class StudentPathEnrollment(Document):
         for row in self.milestone_progress:
             update_milestone_status(row, self)
 
+        recalculate_all_milestones(self)
+
         self._compute_completion_percent()
 
     def on_update(self):

@@ -139,7 +139,9 @@ def _build_pdf_context(student):
     result = get_student_career_path(student)
 
     student_doc = frappe.get_doc("Student", student)
-    student_name = getattr(student_doc, "student_name", None) or student_doc.name
+    first_name = getattr(student_doc, "first_name", "") or ""
+    last_name = getattr(student_doc, "last_name", "") or ""
+    student_name = f"{first_name} {last_name}".strip() or student_doc.name
 
     context = {
         "student_id": student_doc.name,
@@ -204,10 +206,9 @@ def get_career_path_pdf(student):
         "nexedu/templates/path_finder.html", context
     )
     frappe.logger().info(f"HTML length: {len(html)}")
-    pdf_content = get_pdf(html, {...})
-    frappe.logger().info(f"PDF length: {len(pdf_content) if pdf_content else 'None'}")
 
     pdf_content = get_pdf(html, {"orientation": "Portrait", "page-size": "A4"})
+    frappe.logger().info(f"PDF length: {len(pdf_content) if pdf_content else 'None'}")
 
     frappe.local.response.filename = f"career_path_{student}.pdf"
     frappe.local.response.filecontent = pdf_content
@@ -771,6 +772,7 @@ def get_best_path(student):
 
     for m in path_milestones:
         m["points"] = [p.strip() for p in (m.get("milestone_points") or "").split("\n") if p.strip()]
+        m["description"] = ", ".join(m["points"]) if m["points"] else ""
 
     best["prerequisite_skills"] = prereq_skills
     best["milestones"] = path_milestones
@@ -917,6 +919,7 @@ def get_active_plan(student):
             "is_prereq"           : row.is_prereq,
             "is_lock"             : row.is_lock,
             "points"              : m_points,
+            "description"         : ", ".join(p["point_title"] for p in m_points) if m_points else "",
         })
 
     difficulty_level, average_salary = frappe.db.get_value(

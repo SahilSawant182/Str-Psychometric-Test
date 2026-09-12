@@ -401,7 +401,7 @@ def _normalise_answer(answer, options, correct_answer=None):
     return ""
 
 
-def _normalise_questions(data):
+def _normalise_questions(data, level=None):
     if not isinstance(data, dict):
         raise ValueError("Model response must be a JSON object")
     questions = data.get("questions")
@@ -456,6 +456,17 @@ def _normalise_questions(data):
                 "source": "ollama",
             }
         )
+
+    if level:
+        mcq_count = sum(1 for q in normalised if q["type"] == "mcq")
+        desc_count = len(normalised) - mcq_count
+        if level == "Beginner" and (mcq_count != 5 or desc_count != 0):
+            raise ValueError("Beginner level must have exactly 5 MCQs.")
+        elif level == "Intermediate" and (mcq_count != 4 or desc_count != 1):
+            raise ValueError("Intermediate level must have exactly 4 MCQs and 1 descriptive question.")
+        elif level == "Advanced" and (mcq_count != 3 or desc_count != 2):
+            raise ValueError("Advanced level must have exactly 3 MCQs and 2 descriptive questions.")
+
     return normalised
 
 
@@ -477,20 +488,24 @@ def _generate_questions(skill, level):
         mix_instruction=mix_instruction
     )
     last_error = None
+    fallback_questions = None
     for attempt in range(QUESTION_GENERATION_ATTEMPTS):
         try:
-            raw = _llm_chat(prompt, max_tokens=QUESTION_MAX_TOKENS)
-            return _normalise_questions(_parse_json(raw))
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            response = _llm_chat(prompt, max_tokens=QUESTION_MAX_TOKENS)
+            # Try to parse without strict level checking first for fallback
+            raw_parsed = _normalise_questions(_parse_json(response))
+            fallback_questions = raw_parsed
+            
+            # Now enforce the strict mix
+            normalised = _normalise_questions(_parse_json(response), level)
+            return normalised
+        except Exception as exc:
             last_error = exc
-            if attempt + 1 < QUESTION_GENERATION_ATTEMPTS:
-                continue
+            continue
 
-    raise ValueError(
-        "Model failed to return valid questions after {0} attempts: {1}".format(
-            QUESTION_GENERATION_ATTEMPTS, last_error
-        )
-    )
+    if fallback_questions:
+        return fallback_questions
+    frappe.throw("Model failed to return valid questions after {0} attempts: {1}".format(QUESTION_GENERATION_ATTEMPTS, last_error))
 
 
 def _answers_to_list(answers, questions):
@@ -1132,6 +1147,8 @@ def evaluate_and_finalise_skill_test(
                 )
                 for enr in enrollments:
                     enr_doc = frappe.get_doc("Student Path Enrollment", enr.name)
+                    from nexedu.path_finder.utils.milestone_engine import recalculate_all_milestones
+                    recalculate_all_milestones(enr_doc)
                     current_order = enr_doc.current_milestone_order or 1
                     active_milestone = next(
                         (r for r in enr_doc.milestone_progress if r.idx == current_order), None
