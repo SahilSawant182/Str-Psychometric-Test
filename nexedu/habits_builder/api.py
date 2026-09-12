@@ -1295,3 +1295,115 @@ def get_badge_icon(file_url: str):
         "Content-Type": mime_type,
         "Cache-Control": "public, max-age=31536000"
     }
+
+#HABIT COMPLETION HEATMAP  (GitHub-style, 52-week grid)
+
+@frappe.whitelist(allow_guest=True)
+def get_habit_completion_heatmap(student: str, year: int = None) -> dict:
+    
+    import calendar as cal_mod
+    from datetime import date as date_cls
+
+    # ── Resolve year ─────────────────────────────────────────────────────────
+    if not year:
+        year = getdate(today()).year
+    year = int(year)
+
+    year_start = date_cls(year, 1, 1)
+    year_end   = date_cls(year, 12, 31)
+
+    # ── Fetch all "Done" logs for the student in the given year ───────────────
+    raw_logs = frappe.get_all(
+        "Habit Daily Log",
+        filters={
+            "student"  : student,
+            "status"   : "Done",
+            "log_date" : ["between", [str(year_start), str(year_end)]]
+        },
+        fields=["log_date"],
+        ignore_permissions=True
+    )
+
+    # Count how many habits were completed per calendar day
+    count_by_date = {}
+    for log in raw_logs:
+        d = log.log_date
+        if hasattr(d, "date"):
+            d = d.date()
+        else:
+            d = getdate(d)
+        ds = str(d)
+        count_by_date[ds] = count_by_date.get(ds, 0) + 1
+
+    total_done = sum(count_by_date.values())
+    max_count  = max(count_by_date.values()) if count_by_date else 0
+
+    # ── Intensity thresholds (GitHub-style 5 levels: 0-4) ────────────────────
+    def _intensity(count: int, mx: int) -> int:
+        if count == 0 or mx == 0:
+            return 0
+        ratio = count / mx
+        if ratio <= 0.25:
+            return 1
+        if ratio <= 0.50:
+            return 2
+        if ratio <= 0.75:
+            return 3
+        return 4
+
+    # ── Build the flat list of all 365/366 days ───────────────────────────────
+    # GitHub aligns Sunday = column 0 (week starts on Sunday)
+    all_days = []
+    cur = year_start
+    while cur <= year_end:
+        ds    = str(cur)
+        count = count_by_date.get(ds, 0)
+        # Python weekday(): Mon=0 … Sun=6  →  convert to Sun=0 … Sat=6
+        dow   = (cur.weekday() + 1) % 7
+        all_days.append({
+            "date"        : ds,
+            "count"       : count,
+            "intensity"   : _intensity(count, max_count),
+            "day_of_week" : dow
+        })
+        cur += timedelta(days=1)
+
+    # ── Pack days into week columns ───────────────────────────────────────────
+    # Pad the beginning so the first real day lines up with its day-of-week slot
+    first_dow = all_days[0]["day_of_week"]  # 0=Sun … 6=Sat
+    _null_day = {"date": None, "count": 0, "intensity": 0, "day_of_week": None}
+
+    padded = [_null_day] * first_dow + all_days
+    # Pad end to complete the final week
+    remainder = len(padded) % 7
+    if remainder:
+        padded += [_null_day] * (7 - remainder)
+
+    weeks = []
+    for w_idx in range(len(padded) // 7):
+        week_days = padded[w_idx * 7 : w_idx * 7 + 7]
+        weeks.append({"week_number": w_idx, "days": week_days})
+
+    # ── Month label positions ─────────────────────────────────────────────────
+    # Find which week-column each month's 1st lands in
+    month_labels = []
+    seen_months  = set()
+    for w_idx, week in enumerate(weeks):
+        for day in week["days"]:
+            if day["date"] is None:
+                continue
+            d = getdate(day["date"])
+            if d.month not in seen_months:
+                seen_months.add(d.month)
+                month_labels.append({
+                    "name"       : d.strftime("%b"),
+                    "week_index" : w_idx
+                })
+
+    return {
+        "year"       : year,
+        "total_done" : total_done,
+        "max_count"  : max_count,
+        "weeks"      : weeks,
+        "months"     : month_labels
+    }
