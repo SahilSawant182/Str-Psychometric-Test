@@ -1179,7 +1179,7 @@ def get_student_badges(student: str) -> dict:
     earned_records = frappe.get_all(
         "Student Earned Badge",
         filters={"student": student},
-        fields=["badge", "earned_date", "habit"]
+        fields=["name", "badge", "earned_date", "habit"]
     )
     earned_badge_names = {r.badge: r for r in earned_records}
 
@@ -1192,7 +1192,7 @@ def get_student_badges(student: str) -> dict:
         earned_info = earned_badge_names.get(b.name)
         
         badges_list.append({
-            "badge_id": b.name,
+            "badge_id": earned_info.name if is_earned else b.name,
             "badge_name": b.badge_name,
             "streak_count": b.streak_count,
             "description": b.description,
@@ -1406,4 +1406,136 @@ def get_habit_completion_heatmap(student: str, year: int = None) -> dict:
         "max_count"  : max_count,
         "weeks"      : weeks,
         "months"     : month_labels
+    }
+
+
+# ---------------------------------------------------------------------------
+# BADGE SHARING – LinkedIn
+# ---------------------------------------------------------------------------
+
+@frappe.whitelist(allow_guest=True)
+def share_badge_on_linkedin(student: str, badge_id: str) -> dict:
+    """
+    Generate a LinkedIn share URL for a badge earned by a student.
+
+    The API validates that:
+      1. The badge exists in Streak Badge.
+      2. The student has actually earned the badge (exists in Student Earned Badge).
+
+    It then returns a pre-built LinkedIn share URL that the frontend can open
+    in a new browser tab — no OAuth or LinkedIn API key required.
+
+    Request params
+    --------------
+    student  : str  – Student docname (e.g. "STU-0001")
+    badge_id : str  – Streak Badge name  (e.g. "7-Day Streak")
+
+    Response shape
+    --------------
+    {
+        "success"       : True,
+        "share_url"     : "<linkedin_share_url>",
+        "badge_name"    : "7-Day Streak",
+        "streak_count"  : 7,
+        "color_theme"   : "Bronze",
+        "earned_date"   : "2026-09-10",
+        "share_text"    : "<human-readable message>"
+    }
+    """
+    # ── 1. Resolve badge_id → accepts either:
+    #        (a) Streak Badge name         e.g. "14-Day Streak"
+    #        (b) Student Earned Badge name e.g. "stu2@gmail.com-14-Day Streak-94657"
+    streak_badge_id = badge_id  # will be updated if (b) is passed
+
+    badge = frappe.db.get_value(
+        "Streak Badge",
+        badge_id,
+        ["badge_name", "streak_count", "description", "color_theme", "is_active"],
+        as_dict=True
+    )
+
+    if not badge:
+        # Maybe the caller passed a Student Earned Badge doc name — resolve it
+        resolved_badge_name = frappe.db.get_value(
+            "Student Earned Badge",
+            badge_id,
+            "badge"
+        )
+        if resolved_badge_name:
+            streak_badge_id = resolved_badge_name
+            badge = frappe.db.get_value(
+                "Streak Badge",
+                streak_badge_id,
+                ["badge_name", "streak_count", "description", "color_theme", "is_active"],
+                as_dict=True
+            )
+
+    if not badge:
+        frappe.throw(
+            f"Badge '{badge_id}' does not exist.",
+            frappe.DoesNotExistError
+        )
+
+    if not badge.is_active:
+        frappe.throw("This badge is currently inactive.", frappe.ValidationError)
+
+    # ── 2. Validate student has earned the badge ────────────────────────────
+    earned = frappe.db.get_value(
+        "Student Earned Badge",
+        {"student": student, "badge": streak_badge_id},
+        ["name", "earned_date"],
+        as_dict=True
+    )
+
+    if not earned:
+        frappe.throw(
+            f"Student '{student}' has not yet earned the '{badge.badge_name}' badge.",
+            frappe.PermissionError
+        )
+
+    # ── 3. Get student name for the share message ───────────────────────────
+    student_full_name = frappe.db.get_value("Student", student) or student
+
+    # ── 4. Build share text ─────────────────────────────────────────────────
+    color_emoji_map = {
+        "Bronze"   : "🥉",
+        "Silver"   : "🥈",
+        "Gold"     : "🥇",
+        "Platinum" : "💎",
+        "Diamond"  : "💎✨",
+    }
+    emoji = color_emoji_map.get(badge.color_theme, "🏅")
+
+    share_text = (
+        f"{emoji} I just earned the {badge.badge_name} on StridenEx! "
+        f"I've built a consistent {badge.streak_count}-day habit streak. "
+        f"Consistency is the key to growth. 🚀 "
+        f"#HabitBuilder #StridenEx #GrowthMindset #Consistency"
+    )
+
+    # ── 5. Build the LinkedIn share URL (no OAuth required) ─────────────────
+    # LinkedIn's share URL uses the `shareArticle` endpoint which accepts:
+    #   mini=true, title, summary, source
+    # The user just needs to be logged into LinkedIn in their browser.
+    import urllib.parse
+
+    site_url = frappe.utils.get_url()  # e.g. https://app.stridenex.in
+
+    linkedin_base = "https://www.linkedin.com/shareArticle"
+    params = {
+        "mini"    : "true",
+        "title"   : f"{badge.badge_name} – StridenEx Habit Badge {emoji}",
+        "summary" : share_text,
+        "source"  : site_url,
+    }
+    share_url = f"{linkedin_base}?{urllib.parse.urlencode(params)}"
+
+    return {
+        "success"      : True,
+        "share_url"    : share_url,
+        "badge_name"   : badge.badge_name,
+        "streak_count" : badge.streak_count,
+        "color_theme"  : badge.color_theme,
+        "earned_date"  : str(earned.earned_date),
+        "share_text"   : share_text,
     }

@@ -19,11 +19,21 @@ OMNIROUTE_BASE_URL = "http://localhost:20128/v1"
 OMNIROUTE_API_KEY = "my_test_omniroute_key"
 
 # --- Shared config ---
-QUESTION_COUNT = 5
+QUESTION_COUNT = 5            # Questions generated per LLM batch (generation)
+BANK_SIZE = 50                # Target number of questions to store per skill/level
+TEST_QUESTION_COUNT = 10      # Questions served to the student per test session
 QUESTION_GENERATION_ATTEMPTS = 3
 QUESTION_MAX_TOKENS = 2200
 PASS_SCORE = 60
 REQUEST_TIMEOUT_SECONDS = 180   # Groq is fast; Ollama needs more time for generation
+
+# Question mix per level for a TEST_QUESTION_COUNT=10 test
+TEST_QUESTION_MIX = {
+    "Beginner":     {"mcq": 10, "descriptive": 0},
+    "Intermediate": {"mcq": 8,  "descriptive": 2},
+    "Advanced":     {"mcq": 6,  "descriptive": 4},
+    "Expert":       {"mcq": 4,  "descriptive": 6},
+}
 
 # Convenience alias — whichever provider is active
 if LLM_PROVIDER == "omniroute":

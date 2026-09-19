@@ -6,6 +6,7 @@ import frappe
 from frappe.utils import cint, now_datetime
 
 from nexedu.api.skill_assessment_config import (
+    BANK_SIZE,
     GROQ_API_KEY,
     GROQ_BASE_URL,
     GROQ_MODEL_NAME,
@@ -18,6 +19,8 @@ from nexedu.api.skill_assessment_config import (
     QUESTION_GENERATION_ATTEMPTS,
     QUESTION_MAX_TOKENS,
     REQUEST_TIMEOUT_SECONDS,
+    TEST_QUESTION_COUNT,
+    TEST_QUESTION_MIX,
 )
 
 
@@ -471,14 +474,15 @@ def _normalise_questions(data, level=None):
 
 
 def _generate_questions(skill, level):
-    if level == "Beginner":
-        mix_instruction = "Generate exactly 5 'mcq' questions (Multiple Choice Questions) and 0 written/descriptive questions."
-    elif level == "Intermediate":
-        mix_instruction = "Generate exactly 4 'mcq' questions and exactly 1 descriptive question (use 'short_answer' or 'problem_solving' type)."
-    elif level == "Advanced":
-        mix_instruction = "Generate exactly 3 'mcq' questions and exactly 2 descriptive questions (use 'long_answer' or 'problem_solving' type)."
-    else:
-        mix_instruction = "Generate exactly 1 'mcq' question and exactly 4 descriptive questions (use 'long_answer' or 'problem_solving' type)."
+    """Generate a batch of QUESTION_COUNT questions for the given skill/level."""
+    # Batch mix: how many MCQs vs descriptive per QUESTION_COUNT=5 batch
+    batch_mix = {
+        "Beginner":     "Generate exactly 5 'mcq' questions and 0 descriptive questions.",
+        "Intermediate": "Generate exactly 4 'mcq' questions and exactly 1 descriptive question (use 'short_answer' or 'problem_solving' type).",
+        "Advanced":     "Generate exactly 3 'mcq' questions and exactly 2 descriptive questions (use 'long_answer' or 'problem_solving' type).",
+        "Expert":       "Generate exactly 1 'mcq' question and exactly 4 descriptive questions (use 'long_answer' or 'problem_solving' type).",
+    }
+    mix_instruction = batch_mix.get(level, batch_mix["Beginner"])
 
     prompt = _fill_prompt(
         _prompt_section("Quiz prompt"),
@@ -492,11 +496,8 @@ def _generate_questions(skill, level):
     for attempt in range(QUESTION_GENERATION_ATTEMPTS):
         try:
             response = _llm_chat(prompt, max_tokens=QUESTION_MAX_TOKENS)
-            # Try to parse without strict level checking first for fallback
             raw_parsed = _normalise_questions(_parse_json(response))
             fallback_questions = raw_parsed
-            
-            # Now enforce the strict mix
             normalised = _normalise_questions(_parse_json(response), level)
             return normalised
         except Exception as exc:
@@ -506,6 +507,182 @@ def _generate_questions(skill, level):
     if fallback_questions:
         return fallback_questions
     frappe.throw("Model failed to return valid questions after {0} attempts: {1}".format(QUESTION_GENERATION_ATTEMPTS, last_error))
+
+
+def _get_skill_syllabus_topics(skill, level):
+    """Read the learning_points JSON from the Skill master and return a flat list of topic strings for the given level."""
+    try:
+        skill_doc = frappe.get_doc("Skill", skill)
+        raw = getattr(skill_doc, "learning_points", None) or ""
+        if not raw:
+            return []
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            # Structure: {"Beginner": [...], "Intermediate": [...], "Advanced": [...]}
+            return [str(t) for t in (data.get(level) or [])]
+        if isinstance(data, list):
+            return [str(t) for t in data]
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Skill Syllabus Topics Load Error")
+    return []
+
+
+def _build_bank_prompt(skill, level, topics, batch_num):
+    """Build a generation prompt that anchors question generation to a specific set of syllabus topics."""
+    batch_mix = {
+        "Beginner":     "Generate exactly 5 'mcq' questions and 0 descriptive questions.",
+        "Intermediate": "Generate exactly 4 'mcq' questions and exactly 1 descriptive question (use 'short_answer' or 'problem_solving' type).",
+        "Advanced":     "Generate exactly 3 'mcq' questions and exactly 2 descriptive questions (use 'long_answer' or 'problem_solving' type).",
+        "Expert":       "Generate exactly 1 'mcq' question and exactly 4 descriptive questions (use 'long_answer' or 'problem_solving' type).",
+    }
+    mix_instruction = batch_mix.get(level, batch_mix["Beginner"])
+
+    if topics:
+        topic_hint = " Focus questions ONLY on these specific topics: {0}.".format(", ".join(topics[:6]))
+    else:
+        topic_hint = ""
+
+    base_prompt = _prompt_section("Quiz prompt")
+    return _fill_prompt(
+        base_prompt,
+        skill=skill,
+        level=level,
+        question_count=QUESTION_COUNT,
+        mix_instruction=mix_instruction + topic_hint,
+    )
+
+
+def _bank_count(skill, level):
+    """Return the number of active questions currently in the bank for this skill+level."""
+    return frappe.db.count("Skill Question Bank", {
+        "skill": skill,
+        "level": level,
+        "is_active": 1,
+    })
+
+
+def _save_batch_to_bank(skill, level, questions, batch_label):
+    """Persist a list of normalised question dicts to the Skill Question Bank doctype."""
+    for q in questions:
+        doc = frappe.get_doc({
+            "doctype": "Skill Question Bank",
+            "skill": skill,
+            "level": level,
+            "question_type": q["type"],
+            "difficulty": q.get("difficulty") or "medium",
+            "topic": "",
+            "is_active": 1,
+            "generation_batch": batch_label,
+            "question_text": q["question"],
+            "options": json.dumps(q.get("options") or []),
+            "correct_answer": q.get("answer") or "",
+            "rubric": q.get("rubric") or "",
+        })
+        doc.insert(ignore_permissions=True)
+    frappe.db.commit()
+
+
+@frappe.whitelist()
+def generate_question_bank(skill=None, level=None):
+    """
+    Background-safe function that fills the Skill Question Bank with BANK_SIZE questions
+    for the given skill and level. Uses learning_points as topic anchors for diversity.
+    Can be called via API or via bench execute for a single skill/level.
+    """
+    import time
+    skill = (skill or "").strip()
+    level = _normalise_level(level)
+    if not skill:
+        frappe.throw("Skill is required.")
+
+    target = BANK_SIZE  # 50
+    current = _bank_count(skill, level)
+    if current >= target:
+        return {"message": "Bank already full ({0}/{1}).".format(current, target)}
+
+    # Load syllabus topics
+    all_topics = _get_skill_syllabus_topics(skill, level)
+    topic_groups = []
+    if all_topics:
+        # Spread topics evenly across batches to ensure diversity
+        num_batches = (target - current + QUESTION_COUNT - 1) // QUESTION_COUNT
+        chunk_size = max(1, len(all_topics) // max(1, num_batches))
+        for i in range(0, len(all_topics), chunk_size):
+            topic_groups.append(all_topics[i:i + chunk_size])
+
+    batch_num = 0
+    while _bank_count(skill, level) < target:
+        batch_num += 1
+        topics = topic_groups[batch_num % len(topic_groups)] if topic_groups else []
+        batch_label = "batch-{0}".format(batch_num)
+
+        try:
+            prompt = _build_bank_prompt(skill, level, topics, batch_num)
+            response = _llm_chat(prompt, max_tokens=QUESTION_MAX_TOKENS)
+            questions = _normalise_questions(_parse_json(response))
+            _save_batch_to_bank(skill, level, questions, batch_label)
+        except Exception as exc:
+            frappe.log_error(frappe.get_traceback(), "Question Bank Generation Error ({0} {1} batch {2})".format(skill, level, batch_num))
+            if batch_num > (target // QUESTION_COUNT) * 3:
+                break  # Safety: give up after 3x the expected batches
+
+        time.sleep(1)
+
+    final_count = _bank_count(skill, level)
+    return {"message": "Bank for {0} ({1}) now has {2} questions.".format(skill, level, final_count)}
+
+
+def _get_bank_questions(skill, level):
+    """
+    Randomly select TEST_QUESTION_COUNT questions from the Skill Question Bank,
+    maintaining the correct MCQ/descriptive mix for the given level.
+    Returns a list of normalised question dicts, or None if the bank is too small.
+    """
+    import random
+
+    mix = TEST_QUESTION_MIX.get(level, {"mcq": TEST_QUESTION_COUNT, "descriptive": 0})
+    n_mcq = mix["mcq"]
+    n_desc = mix["descriptive"]
+
+    # Fetch all active MCQ and descriptive questions separately
+    mcq_rows = frappe.get_all(
+        "Skill Question Bank",
+        filters={"skill": skill, "level": level, "is_active": 1, "question_type": "mcq"},
+        fields=["name", "question_type", "question_text", "options", "correct_answer", "rubric", "difficulty"],
+    )
+    desc_rows = frappe.get_all(
+        "Skill Question Bank",
+        filters={"skill": skill, "level": level, "is_active": 1, "question_type": ["not in", ["mcq"]]},
+        fields=["name", "question_type", "question_text", "options", "correct_answer", "rubric", "difficulty"],
+    )
+
+    if len(mcq_rows) < n_mcq or (n_desc > 0 and len(desc_rows) < n_desc):
+        return None  # Bank too small — fall back to live generation
+
+    selected_mcq = random.sample(mcq_rows, n_mcq)
+    selected_desc = random.sample(desc_rows, n_desc) if n_desc > 0 else []
+    combined = selected_mcq + selected_desc
+    random.shuffle(combined)
+
+    # Convert to the normalised question dict format
+    result = []
+    for idx, row in enumerate(combined, 1):
+        try:
+            opts = json.loads(row.get("options") or "[]")
+        except Exception:
+            opts = []
+        result.append({
+            "index": idx,
+            "type": row["question_type"],
+            "question": row["question_text"],
+            "options": opts,
+            "answer": row.get("correct_answer") or "",
+            "rubric": row.get("rubric") or "",
+            "difficulty": row.get("difficulty") or "medium",
+            "source": "bank",
+        })
+    return result
+
 
 
 def _answers_to_list(answers, questions):
@@ -821,33 +998,51 @@ def get_skill_test_questions(student=None, skill=None, level=None):
         frappe.throw("Skill is required.")
     _student_exists(student)
 
-    # Cache document name is the lowercase skill name
-    cache_name = skill.strip().lower()
-    fieldname = _get_cache_fieldname(level)
+    # -----------------------------------------------------------------------
+    # Priority 1: Pull TEST_QUESTION_COUNT random questions from the Question Bank.
+    # This ensures every student gets a unique, randomised set.
+    # -----------------------------------------------------------------------
+    questions = _get_bank_questions(skill, level)
 
-    # Try to fetch from cache first
-    cached_questions_json = None
-    if frappe.db.exists("Skill Assessment Cache", cache_name):
-        cached_questions_json = frappe.db.get_value("Skill Assessment Cache", cache_name, fieldname)
+    # -----------------------------------------------------------------------
+    # Priority 2 (Fallback): Old Skill Assessment Cache — 5 fixed questions.
+    # Used when the bank is not yet populated for this skill+level.
+    # -----------------------------------------------------------------------
+    if not questions:
+        cache_name = skill.strip().lower()
+        fieldname = _get_cache_fieldname(level)
+        cached_questions_json = None
+        if frappe.db.exists("Skill Assessment Cache", cache_name):
+            cached_questions_json = frappe.db.get_value("Skill Assessment Cache", cache_name, fieldname)
+        if cached_questions_json:
+            try:
+                questions = json.loads(cached_questions_json)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "Skill Assessment Cache Parse Error")
 
-    questions = None
-    if cached_questions_json:
-        try:
-            questions = json.loads(cached_questions_json)
-        except Exception:
-            frappe.log_error(frappe.get_traceback(), "Skill Assessment Cache Parse Error")
-
+    # -----------------------------------------------------------------------
+    # Priority 3: Generate live (triggers bank fill in background).
+    # -----------------------------------------------------------------------
     if not questions:
         try:
             questions = _generate_questions(skill, level)
-            # Store in cache
+            # Also kick off background bank population so next time we serve from bank
+            frappe.enqueue(
+                "nexedu.api.skill_assessment_ai.generate_question_bank",
+                queue="long",
+                timeout=43200,
+                skill=skill,
+                level=level,
+                now=frappe.flags.in_test,
+            )
+            # Also save to legacy cache for immediate subsequent requests
+            cache_name = skill.strip().lower()
+            fieldname = _get_cache_fieldname(level)
             if frappe.db.exists("Skill Assessment Cache", cache_name):
-                # Update existing cache document
                 cache_doc = frappe.get_doc("Skill Assessment Cache", cache_name)
                 cache_doc.set(fieldname, json.dumps(questions))
                 cache_doc.save(ignore_permissions=True)
             else:
-                # Create a new cache document
                 cache_doc = frappe.get_doc({
                     "doctype": "Skill Assessment Cache",
                     "skill": skill,
@@ -869,6 +1064,8 @@ def get_skill_test_questions(student=None, skill=None, level=None):
     }
 
 
+
+
 @frappe.whitelist()
 def submit_skill_test_answers(student=None, skill=None, level=None, answers=None):
     student = (student or "").strip()
@@ -881,29 +1078,56 @@ def submit_skill_test_answers(student=None, skill=None, level=None, answers=None
     _student_exists(student)
     assessment, answers = _build_submission(student, skill, level, answers)
 
-    # Enrich submitted questions with cached metadata (correct answer keys for MCQs, rubrics, etc.)
+    # Enrich submitted questions with metadata (correct answer keys, rubrics, types, options).
+    # Priority 1: Question Bank (new architecture)
+    # Priority 2: Legacy Skill Assessment Cache
+    bank_map = {}
+    try:
+        bank_rows = frappe.get_all(
+            "Skill Question Bank",
+            filters={"skill": skill, "level": level, "is_active": 1},
+            fields=["question_text", "question_type", "options", "correct_answer", "rubric", "difficulty"],
+        )
+        for row in bank_rows:
+            try:
+                opts = json.loads(row.get("options") or "[]")
+            except Exception:
+                opts = []
+            bank_map[row["question_text"].strip().lower()] = {
+                "type": row["question_type"],
+                "options": opts,
+                "answer": row.get("correct_answer") or "",
+                "rubric": row.get("rubric") or "",
+                "difficulty": row.get("difficulty") or "medium",
+            }
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Question Bank Load in Submission Error")
+
+    # Legacy cache fallback
+    cache_map = {}
     cache_name = skill.strip().lower()
     fieldname = _get_cache_fieldname(level)
-    cached_questions_json = None
     if frappe.db.exists("Skill Assessment Cache", cache_name):
         cached_questions_json = frappe.db.get_value("Skill Assessment Cache", cache_name, fieldname)
+        if cached_questions_json:
+            try:
+                cached_questions = json.loads(cached_questions_json)
+                cache_map = {q["question"].strip().lower(): q for q in cached_questions}
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "Skill Assessment Cache Load in Submission Error")
 
-    if cached_questions_json:
-        try:
-            cached_questions = json.loads(cached_questions_json)
-            cached_map = {q["question"].strip().lower(): q for q in cached_questions}
-            for q in assessment.get("questions", []):
-                q_text = q["question"].strip().lower()
-                if q_text in cached_map:
-                    cached_q = cached_map[q_text]
-                    q["answer"] = cached_q.get("answer") or ""
-                    q["rubric"] = cached_q.get("rubric") or q["rubric"]
-                    q["difficulty"] = cached_q.get("difficulty") or q["difficulty"]
-                    q["type"] = cached_q.get("type") or q["type"]
-                    if cached_q.get("options"):
-                        q["options"] = [str(opt).strip() for opt in cached_q["options"]]
-        except Exception:
-            frappe.log_error(frappe.get_traceback(), "Skill Assessment Cache Load in Submission Error")
+    for q in assessment.get("questions", []):
+        q_text = q["question"].strip().lower()
+        source = bank_map.get(q_text) or cache_map.get(q_text)
+        if source:
+            q["answer"] = source.get("answer") or ""
+            q["rubric"] = source.get("rubric") or q["rubric"]
+            q["difficulty"] = source.get("difficulty") or q["difficulty"]
+            q["type"] = source.get("type") or q["type"]
+            if source.get("options"):
+                q["options"] = [str(opt).strip() for opt in source["options"]]
+
+
 
     # -----------------------------------------------------------------------
     # Phase 1: Instant MCQ scoring (pure Python, zero LLM calls).
