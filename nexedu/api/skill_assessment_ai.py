@@ -510,13 +510,13 @@ def _generate_questions(skill, level):
 
 
 def _get_skill_syllabus_topics(skill, level):
-    """Read the learning_points JSON from the Skill master and return a flat list of topic strings for the given level."""
+    """Read the learning_points_json field from the Skill master and return a flat list of topic strings for the given level."""
     try:
         skill_doc = frappe.get_doc("Skill", skill)
-        raw = getattr(skill_doc, "learning_points", None) or ""
+        raw = getattr(skill_doc, "learning_points_json", None) or ""
         if not raw:
             return []
-        data = json.loads(raw)
+        data = json.loads(raw) if isinstance(raw, str) else raw
         if isinstance(data, dict):
             # Structure: {"Beginner": [...], "Intermediate": [...], "Advanced": [...]}
             return [str(t) for t in (data.get(level) or [])]
