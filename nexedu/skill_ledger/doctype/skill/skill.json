@@ -21,7 +21,8 @@
   "min_level_achieved",
   "section_notes",
   "is_trending",
-  "description"
+  "description",
+  "learning_points_json"
  ],
  "fields": [
   {
@@ -100,6 +101,12 @@
    "fieldname": "table_jiaj",
    "fieldtype": "Table",
    "options": "Industry Alignment Child"
+  },
+  {
+   "fieldname": "learning_points_json",
+   "fieldtype": "JSON",
+   "label": "Learning Points (JSON)",
+   "description": "AI-generated learning points per level: {\"Beginner\": [...], \"Intermediate\": [...], \"Advanced\": [...]}"
   }
  ],
  "grid_page_length": 50,
