@@ -552,13 +552,31 @@ def _build_bank_prompt(skill, level, topics, batch_num):
     )
 
 
+def _safe_db_reconnect():
+    """Reconnect to MySQL if the connection was lost (OperationalError 2013)."""
+    try:
+        frappe.db.connect()
+    except Exception:
+        pass
+
+
 def _bank_count(skill, level):
     """Return the number of active questions currently in the bank for this skill+level."""
-    return frappe.db.count("Skill Question Bank", {
-        "skill": skill,
-        "level": level,
-        "is_active": 1,
-    })
+    try:
+        return frappe.db.count("Skill Question Bank", {
+            "skill": skill,
+            "level": level,
+            "is_active": 1,
+        })
+    except Exception as e:
+        if "2013" in str(e) or "Lost connection" in str(e):
+            _safe_db_reconnect()
+            return frappe.db.count("Skill Question Bank", {
+                "skill": skill,
+                "level": level,
+                "is_active": 1,
+            })
+        raise
 
 
 def _save_batch_to_bank(skill, level, questions, batch_label):
@@ -622,7 +640,18 @@ def generate_question_bank(skill=None, level=None):
             questions = _normalise_questions(_parse_json(response))
             _save_batch_to_bank(skill, level, questions, batch_label)
         except Exception as exc:
-            frappe.log_error(frappe.get_traceback(), "Question Bank Generation Error ({0} {1} batch {2})".format(skill, level, batch_num))
+            # Reconnect if MySQL dropped the connection (memory pressure / long-running job)
+            if "2013" in str(exc) or "Lost connection" in str(exc):
+                _safe_db_reconnect()
+            # Safely log the error — frappe_whatsapp hook can also fail if DB is down,
+            # so we must not let log_error propagate and crash the RQ worker.
+            try:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    "Question Bank Generation Error ({0} {1} batch {2})".format(skill, level, batch_num)
+                )
+            except Exception:
+                pass  # Never let log_error crash the worker
             if batch_num > (target // QUESTION_COUNT) * 3:
                 break  # Safety: give up after 3x the expected batches
 
@@ -1459,15 +1488,14 @@ def get_skill_test_result(skill_test_name, **kwargs):
 
 
 @frappe.whitelist()
-def enqueue_prepopulate_cache():
+def enqueue_generate_question_banks():
     """
-    Enqueues the prepopulate task to run in the background if it is not already running
-    and if there are actually uncached skill levels.
+    Enqueues the question bank generation task to run in the background.
     """
     import frappe.utils.background_jobs
     
     # Check if job is enqueued (not started yet)
-    is_active = frappe.utils.background_jobs.is_job_enqueued("nexedu.api.skill_assessment_ai.prepopulate_assessment_cache")
+    is_active = frappe.utils.background_jobs.is_job_enqueued("nexedu.api.skill_assessment_ai.prepopulate_question_banks")
     
     # Check if job is currently started/executing
     if not is_active:
@@ -1476,89 +1504,34 @@ def enqueue_prepopulate_cache():
             started_ids = q.started_job_registry.get_job_ids()
             for j_id in started_ids:
                 job = q.fetch_job(j_id)
-                if job and job.kwargs.get("method") == "nexedu.api.skill_assessment_ai.prepopulate_assessment_cache":
+                if job and job.kwargs.get("method") == "nexedu.api.skill_assessment_ai.prepopulate_question_banks":
                     is_active = True
                     break
             if is_active:
                 break
                 
     if is_active:
-        return {"message": "Pre-population task is already enqueued or running."}
-
-    # Verify if there is any missing level to cache
-    skills = frappe.get_all("Skill", fields=["skill_name"])
-    levels = ["Beginner", "Intermediate", "Advanced", "Expert"]
-    has_missing = False
-
-    for s_item in skills:
-        skill = s_item.get("skill_name")
-        if not skill:
-            continue
-        cache_name = skill.strip().lower()
-        
-        # Check cache doc
-        cache_exists = frappe.db.exists("Skill Assessment Cache", cache_name)
-        if not cache_exists:
-            has_missing = True
-            break
-            
-        cache_doc = frappe.get_doc("Skill Assessment Cache", cache_name)
-        for level in levels:
-            fieldname = _get_cache_fieldname(level)
-            if not cache_doc.get(fieldname):
-                has_missing = True
-                break
-        if has_missing:
-            break
-
-    if not has_missing:
-        return {"message": "All skills are already fully cached."}
+        return {"message": "Question bank generation task is already enqueued or running."}
 
     frappe.enqueue(
-        "nexedu.api.skill_assessment_ai.prepopulate_assessment_cache",
+        "nexedu.api.skill_assessment_ai.prepopulate_question_banks",
         queue="long",
         timeout=43200,
         now=frappe.flags.in_test
     )
-    return {"message": "Pre-population task enqueued successfully in the background queue."}
+    return {"message": "Question bank generation task enqueued successfully in the background queue."}
 
 
-def prepopulate_assessment_cache():
+def prepopulate_question_banks():
     """
-    Iterates over all skills and pre-generates questions for Beginner, Intermediate, and Advanced levels
-    if they are not already cached.
+    Iterates over all skills and generates questions for Beginner, Intermediate, and Advanced levels
+    if their Question Bank does not have enough questions.
     """
     import time
+    from nexedu.api.skill_assessment_config import BANK_SIZE
     
     skills = frappe.get_all("Skill", fields=["skill_name"])
     levels = ["Beginner", "Intermediate", "Advanced", "Expert"]
-    dummy_student = "system@stridenex.com"
-
-    # Ensure dummy student exists or fallback
-    if not frappe.db.exists("Student", dummy_student):
-        first_student = frappe.db.get_value("Student", {}, "email_id")
-        if first_student:
-            dummy_student = first_student
-        else:
-            college = frappe.db.get_value("College", {}, "name")
-            if not college:
-                # Create a default college
-                college_doc = frappe.get_doc({
-                    "doctype": "College",
-                    "college_name": "System College"
-                })
-                college_doc.insert(ignore_permissions=True)
-                college = college_doc.name
-            
-            mock_student = frappe.get_doc({
-                "doctype": "Student",
-                "email_id": dummy_student,
-                "first_name": "System",
-                "last_name": "Scheduler",
-                "college": college
-            })
-            mock_student.insert(ignore_permissions=True)
-            frappe.db.commit()
 
     total_generated = 0
     total_skipped = 0
@@ -1568,33 +1541,17 @@ def prepopulate_assessment_cache():
         if not skill:
             continue
 
-        cache_name = skill.strip().lower()
-        
-        # Check or retrieve the cache document
-        cache_exists = frappe.db.exists("Skill Assessment Cache", cache_name)
-        if cache_exists:
-            cache_doc = frappe.get_doc("Skill Assessment Cache", cache_name)
-        else:
-            cache_doc = None
-
         for level in levels:
-            fieldname = _get_cache_fieldname(level)
-            
-            # Check if this level is already cached
-            if cache_doc and cache_doc.get(fieldname):
+            # Check if this level is already populated
+            count = frappe.db.count("Skill Question Bank", filters={"skill": skill, "level": level})
+            if count >= BANK_SIZE:
                 total_skipped += 1
                 continue
 
-            # Level is missing, let's generate it
+            # Level is missing or partially filled, let's generate it
             try:
-                get_skill_test_questions(dummy_student, skill, level)
+                generate_question_bank(skill, level)
                 total_generated += 1
-                
-                # Reload cache doc for the next level checks in the same skill
-                if cache_doc:
-                    cache_doc.reload()
-                else:
-                    cache_doc = frappe.get_doc("Skill Assessment Cache", cache_name)
                 
                 # Commit after each level to ensure progress is saved immediately
                 frappe.db.commit()
@@ -1602,13 +1559,22 @@ def prepopulate_assessment_cache():
                 # Sleep a short while to cool down Ollama and avoid server overload
                 time.sleep(3)
             except Exception as e:
-                # Log error but continue with the next level/skill
-                frappe.log_error(
-                    message=f"Failed to pre-generate {skill} ({level}): {str(e)}",
-                    title="Skill Pre-population Failed"
-                )
+                # Reconnect if MySQL dropped the connection (long-running job)
+                if "2013" in str(e) or "Lost connection" in str(e):
+                    _safe_db_reconnect()
+                # Safely log
+                try:
+                    frappe.log_error(
+                        message=f"Failed to generate bank for {skill} ({level}): {str(e)}",
+                        title="Skill Question Bank Generation Failed"
+                    )
+                except Exception:
+                    pass
                 # Still commit whatever succeeded
-                frappe.db.commit()
+                try:
+                    frappe.db.commit()
+                except Exception:
+                    pass
 
     return {
         "status": "Completed",

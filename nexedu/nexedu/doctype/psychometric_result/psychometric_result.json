@@ -1,0 +1,158 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "PTR-.YYYY.-.#####",
+
+ "creation": "2026-09-20 08:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "test_instance",
+  "student_test_screen",
+  "student",
+  "profile_type",
+  "column_break_scores",
+  "job_score",
+  "entrepreneurship_score",
+  "higher_education_score",
+  "section_break_raw",
+  "raw_job_score",
+  "raw_entrepreneurship_score",
+  "raw_higher_education_score",
+  "column_break_weights",
+  "total_job_weight",
+  "total_entrepreneurship_weight",
+  "total_higher_education_weight",
+  "section_break_interp",
+  "interpretation"
+ ],
+ "fields": [
+  {
+   "fieldname": "test_instance",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Test Instance",
+   "options": "Psychometric Test Instance"
+  },
+  {
+   "fieldname": "student_test_screen",
+   "fieldtype": "Link",
+   "label": "Student Test Screen",
+   "options": "Student Test Screen"
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Student User",
+   "options": "User"
+  },
+  {
+   "fieldname": "profile_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Career Inclination Result"
+  },
+  {
+   "fieldname": "column_break_scores",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "job_score",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Job Score (0-100)"
+  },
+  {
+   "fieldname": "entrepreneurship_score",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Entrepreneurship Score (0-100)"
+  },
+  {
+   "fieldname": "higher_education_score",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Higher Education Score (0-100)"
+  },
+  {
+   "fieldname": "section_break_raw",
+   "fieldtype": "Section Break",
+   "label": "Raw Scores"
+  },
+  {
+   "fieldname": "raw_job_score",
+   "fieldtype": "Float",
+   "label": "Raw Job Score"
+  },
+  {
+   "fieldname": "raw_entrepreneurship_score",
+   "fieldtype": "Float",
+   "label": "Raw Entrepreneurship Score"
+  },
+  {
+   "fieldname": "raw_higher_education_score",
+   "fieldtype": "Float",
+   "label": "Raw Higher Education Score"
+  },
+  {
+   "fieldname": "column_break_weights",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_job_weight",
+   "fieldtype": "Float",
+   "label": "Total Job Weight"
+  },
+  {
+   "fieldname": "total_entrepreneurship_weight",
+   "fieldtype": "Float",
+   "label": "Total Entrepreneurship Weight"
+  },
+  {
+   "fieldname": "total_higher_education_weight",
+   "fieldtype": "Float",
+   "label": "Total Higher Education Weight"
+  },
+  {
+   "fieldname": "section_break_interp",
+   "fieldtype": "Section Break",
+   "label": "Interpretation"
+  },
+  {
+   "fieldname": "interpretation",
+   "fieldtype": "Text Editor",
+   "label": "Interpretation"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-20 08:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Nexedu",
+ "name": "Psychometric Result",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

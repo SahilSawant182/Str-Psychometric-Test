@@ -54,6 +54,18 @@
   "question_index",
   "is_last",
   "no_of_options",
+  "student",
+  "status",
+  "total_job_weight",
+  "total_entrepreneurship_weight",
+  "total_higher_education_weight",
+  "raw_job_score",
+  "raw_entrepreneurship_score",
+  "raw_higher_education_score",
+  "job_score",
+  "entrepreneurship_score",
+  "higher_education_score",
+  "profile_result",
   "section_break_uggb",
   "amended_from"
  ],
@@ -338,6 +350,68 @@
    "fieldtype": "Link",
    "label": "Test",
    "options": "Str Psychometric Test"
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Data",
+   "label": "Student"
+  },
+  {
+   "default": "In Progress",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "In Progress\nCompleted\nSubmitted"
+  },
+  {
+   "fieldname": "total_job_weight",
+   "fieldtype": "Float",
+   "label": "Total Job Weight"
+  },
+  {
+   "fieldname": "total_entrepreneurship_weight",
+   "fieldtype": "Float",
+   "label": "Total Entrepreneurship Weight"
+  },
+  {
+   "fieldname": "total_higher_education_weight",
+   "fieldtype": "Float",
+   "label": "Total Higher Education Weight"
+  },
+  {
+   "fieldname": "raw_job_score",
+   "fieldtype": "Float",
+   "label": "Raw Job Score"
+  },
+  {
+   "fieldname": "raw_entrepreneurship_score",
+   "fieldtype": "Float",
+   "label": "Raw Entrepreneurship Score"
+  },
+  {
+   "fieldname": "raw_higher_education_score",
+   "fieldtype": "Float",
+   "label": "Raw Higher Education Score"
+  },
+  {
+   "fieldname": "job_score",
+   "fieldtype": "Float",
+   "label": "Job Score (0-100)"
+  },
+  {
+   "fieldname": "entrepreneurship_score",
+   "fieldtype": "Float",
+   "label": "Entrepreneurship Score (0-100)"
+  },
+  {
+   "fieldname": "higher_education_score",
+   "fieldtype": "Float",
+   "label": "Higher Education Score (0-100)"
+  },
+  {
+   "fieldname": "profile_result",
+   "fieldtype": "Data",
+   "label": "Career Inclination Result"
   },
   {
    "fieldname": "column_break_fheb",
