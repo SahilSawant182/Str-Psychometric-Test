@@ -1,0 +1,153 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "autoincrement",
+ "creation": "2026-09-20 08:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "question_text",
+  "dimension",
+  "importance_level",
+  "direction",
+  "column_break_1",
+  "job_weight",
+  "entrepreneurship_weight",
+  "higher_education_weight",
+  "section_break_meta",
+  "active",
+  "validation_status",
+  "language",
+  "exposure_count",
+  "version"
+ ],
+ "fields": [
+  {
+   "fieldname": "question_text",
+   "fieldtype": "Text Editor",
+   "in_list_view": 1,
+   "label": "Question Text",
+   "reqd": 1
+  },
+  {
+   "fieldname": "dimension",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Psychometric Dimension",
+   "options": "Psychometric Dimension",
+   "reqd": 1
+  },
+  {
+   "fieldname": "importance_level",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Importance Level",
+   "options": "Level 1 - Core Discriminators\nLevel 2 - Supporting Discriminators\nLevel 3 - Context Dimensions"
+  },
+  {
+   "default": "Normal",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Direction",
+   "options": "Normal\nReverse"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "job_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Job Weight (0-10)"
+  },
+  {
+   "default": "0",
+   "fieldname": "entrepreneurship_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Entrepreneurship Weight (0-10)"
+  },
+  {
+   "default": "0",
+   "fieldname": "higher_education_weight",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Higher Education Weight (0-10)"
+  },
+  {
+   "fieldname": "section_break_meta",
+   "fieldtype": "Section Break",
+   "label": "Metadata"
+  },
+  {
+   "default": "1",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "default": "Approved",
+   "fieldname": "validation_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Validation Status",
+   "options": "Approved\nDraft\nPending"
+  },
+  {
+   "default": "English",
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Language"
+  },
+  {
+   "default": "0",
+   "fieldname": "exposure_count",
+   "fieldtype": "Int",
+   "label": "Exposure Count"
+  },
+  {
+   "default": "1",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Version"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-20 08:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Nexedu",
+ "name": "Psychometric Question",
+ "naming_rule": "Autoincrement",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

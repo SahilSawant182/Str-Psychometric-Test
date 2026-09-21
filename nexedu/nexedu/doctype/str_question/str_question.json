@@ -10,6 +10,16 @@
   "question",
   "type",
   "is_active",
+  "dimension",
+  "importance_level",
+  "direction",
+  "job_weight",
+  "entrepreneurship_weight",
+  "higher_education_weight",
+  "validation_status",
+  "language",
+  "exposure_count",
+  "version",
   "section_break_crxh",
   "test_subject",
   "section_break_ulef",
@@ -257,6 +267,72 @@
    "fieldname": "is_active",
    "fieldtype": "Check",
    "label": "Is Active"
+  },
+  {
+   "fieldname": "dimension",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Dimension",
+   "options": "Psychometric Dimension"
+  },
+  {
+   "fieldname": "importance_level",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Importance Level",
+   "options": "Level 1 - Core Discriminators\nLevel 2 - Supporting Discriminators\nLevel 3 - Context Dimensions"
+  },
+  {
+   "default": "Normal",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Direction",
+   "options": "Normal\nReverse"
+  },
+  {
+   "default": "0",
+   "fieldname": "job_weight",
+   "fieldtype": "Float",
+   "label": "Job Weight"
+  },
+  {
+   "default": "0",
+   "fieldname": "entrepreneurship_weight",
+   "fieldtype": "Float",
+   "label": "Entrepreneurship Weight"
+  },
+  {
+   "default": "0",
+   "fieldname": "higher_education_weight",
+   "fieldtype": "Float",
+   "label": "Higher Education Weight"
+  },
+  {
+   "default": "Approved",
+   "fieldname": "validation_status",
+   "fieldtype": "Select",
+   "label": "Validation Status",
+   "options": "Approved\nDraft\nPending"
+  },
+  {
+   "default": "English",
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Language"
+  },
+  {
+   "default": "0",
+   "fieldname": "exposure_count",
+   "fieldtype": "Int",
+   "label": "Exposure Count"
+  },
+  {
+   "default": "1",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Version"
   },
   {
    "default": "4",

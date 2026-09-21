@@ -1,118 +1,96 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "{psychometric_test}-{member}-.##",
- "creation": "2026-02-07 18:00:10.693884",
+ "autoname": "PTI-.YYYY.-.#####",
+ "creation": "2026-09-20 08:30:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "psychometric_test",
-  "psychometric_test_type",
-  "column_break_3",
-  "member",
   "student_test_screen",
-  "section_break_dkpn",
-  "score",
-  "score_out_of",
-  "column_break_gkip",
-  "percentage",
-  "passing_percentage",
+  "student",
+  "status",
+  "random_seed",
+  "version",
+  "column_break_meta",
+  "question_index",
+  "total_questions",
+  "language",
+  "section_break_weights",
   "total_job_weight",
   "total_entrepreneurship_weight",
   "total_higher_education_weight",
+  "section_break_raw",
   "raw_job_score",
   "raw_entrepreneurship_score",
   "raw_higher_education_score",
+  "section_break_norm",
   "job_score",
   "entrepreneurship_score",
   "higher_education_score",
-  "profile_type",
-  "section_break_6",
-  "str_test_response"
+  "profile_result",
+  "section_break_responses",
+  "responses"
  ],
  "fields": [
   {
-   "fieldname": "column_break_3",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "member",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Member",
-   "options": "User"
-  },
-  {
-   "fieldname": "section_break_dkpn",
-   "fieldtype": "Section Break"
-  },
-  {
-   "fieldname": "score",
-   "fieldtype": "Int",
-   "in_list_view": 1,
-   "label": "Score",
-   "reqd": 1
-  },
-  {
-   "fetch_from": "quiz.total_marks",
-   "fieldname": "score_out_of",
-   "fieldtype": "Int",
-   "label": "Score Out Of",
-   "non_negative": 1,
-   "read_only": 1,
-   "reqd": 1
-  },
-  {
-   "fieldname": "column_break_gkip",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "percentage",
-   "fieldtype": "Int",
-   "label": "Percentage",
-   "non_negative": 1,
-   "reqd": 1
-  },
-  {
-   "fieldname": "passing_percentage",
-   "fieldtype": "Int",
-   "label": "Passing Percentage",
-   "non_negative": 1,
-   "read_only": 1,
-   "reqd": 1
-  },
-  {
-   "fieldname": "section_break_6",
-   "fieldtype": "Section Break"
-  },
-  {
-   "fieldname": "psychometric_test",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Psychometric Test",
-   "options": "Str Psychometric Test"
-  },
-  {
-   "fieldname": "str_test_response",
-   "fieldtype": "Table",
-   "label": "Str Test Response",
-   "options": "Str Test Response"
-  },
-  {
    "fieldname": "student_test_screen",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Student Test Screen",
    "options": "Student Test Screen"
   },
   {
-   "fetch_from": "quiz.course",
-   "fieldname": "psychometric_test_type",
-   "fieldtype": "Link",
-   "label": "Psychometric Test Type",
-   "options": "Str Psychometric Test-Type",
-   "read_only": 1
+   "fieldname": "student",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Student"
+  },
+
+  {
+   "default": "In Progress",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "In Progress\nCompleted\nSubmitted"
+  },
+  {
+   "fieldname": "random_seed",
+   "fieldtype": "Data",
+   "label": "Random Seed"
+  },
+  {
+   "default": "1",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Version"
+  },
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "question_index",
+   "fieldtype": "Int",
+   "label": "Question Index"
+  },
+  {
+   "default": "30",
+   "fieldname": "total_questions",
+   "fieldtype": "Int",
+   "label": "Total Questions"
+  },
+  {
+   "default": "English",
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "label": "Language"
+  },
+  {
+   "fieldname": "section_break_weights",
+   "fieldtype": "Section Break",
+   "label": "Total Weights"
   },
   {
    "fieldname": "total_job_weight",
@@ -130,6 +108,11 @@
    "label": "Total Higher Education Weight"
   },
   {
+   "fieldname": "section_break_raw",
+   "fieldtype": "Section Break",
+   "label": "Raw Scores"
+  },
+  {
    "fieldname": "raw_job_score",
    "fieldtype": "Float",
    "label": "Raw Job Score"
@@ -145,33 +128,54 @@
    "label": "Raw Higher Education Score"
   },
   {
+   "fieldname": "section_break_norm",
+   "fieldtype": "Section Break",
+   "label": "Normalized Scores & Result"
+  },
+  {
    "fieldname": "job_score",
    "fieldtype": "Float",
-   "label": "Job Score"
+   "in_list_view": 1,
+   "label": "Job Score (0-100)"
   },
   {
    "fieldname": "entrepreneurship_score",
    "fieldtype": "Float",
-   "label": "Entrepreneurship Score"
+   "in_list_view": 1,
+   "label": "Entrepreneurship Score (0-100)"
   },
   {
    "fieldname": "higher_education_score",
    "fieldtype": "Float",
-   "label": "Higher Education Score"
+   "in_list_view": 1,
+   "label": "Higher Education Score (0-100)"
   },
   {
-   "fieldname": "profile_type",
+   "fieldname": "profile_result",
    "fieldtype": "Data",
+   "in_list_view": 1,
    "label": "Career Inclination Result"
+  },
+  {
+   "fieldname": "section_break_responses",
+   "fieldtype": "Section Break",
+   "label": "Responses"
+  },
+  {
+   "fieldname": "responses",
+   "fieldtype": "Table",
+   "label": "Responses",
+   "options": "Psychometric Response"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
+ "is_submittable": 1,
  "links": [],
- "modified": "2026-03-06 11:05:21.296413",
+ "modified": "2026-09-20 08:30:00.000000",
  "modified_by": "Administrator",
  "module": "Nexedu",
- "name": "Str Psychometric Test Submission",
+ "name": "Psychometric Test Instance",
  "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
@@ -185,6 +189,7 @@
    "report": 1,
    "role": "System Manager",
    "share": 1,
+   "submit": 1,
    "write": 1
   }
  ],

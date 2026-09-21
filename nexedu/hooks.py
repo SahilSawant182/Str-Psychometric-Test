@@ -22,8 +22,8 @@ doctype_js = {
  
 # Scheduled Tasks
 scheduler_events = {
-    "all": [
-        "nexedu.api.skill_assessment_ai.enqueue_prepopulate_cache"
+    "hourly": [
+        "nexedu.api.skill_assessment_ai.enqueue_generate_question_banks"
     ],
     "daily": [
         "nexedu.habits_builder.tasks.check_broken_streaks",         # Detect streak breaks overnight

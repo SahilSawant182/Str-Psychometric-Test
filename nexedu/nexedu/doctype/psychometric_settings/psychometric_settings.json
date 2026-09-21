@@ -1,0 +1,101 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-09-20 08:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "total_questions",
+  "level_1_questions_per_dim",
+  "level_2_questions_per_dim",
+  "level_3_total_questions",
+  "column_break_thresholds",
+  "outcome_balance_tolerance",
+  "dominant_threshold",
+  "differentiation_threshold",
+  "version"
+ ],
+ "fields": [
+  {
+   "default": "30",
+   "fieldname": "total_questions",
+   "fieldtype": "Int",
+   "label": "Total Questions per Test",
+   "reqd": 1
+  },
+  {
+   "default": "3",
+   "fieldname": "level_1_questions_per_dim",
+   "fieldtype": "Int",
+   "label": "Level 1 Questions per Dim (7 dims = 21)"
+  },
+  {
+   "default": "1",
+   "fieldname": "level_2_questions_per_dim",
+   "fieldtype": "Int",
+   "label": "Level 2 Questions per Dim (6 dims = 6)"
+  },
+  {
+   "default": "3",
+   "fieldname": "level_3_total_questions",
+   "fieldtype": "Int",
+   "label": "Level 3 Total Questions (2 dims = 3)"
+  },
+  {
+   "fieldname": "column_break_thresholds",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "35.0",
+   "fieldname": "outcome_balance_tolerance",
+   "fieldtype": "Float",
+   "label": "Outcome Balance Tolerance (%)"
+  },
+  {
+   "default": "10.0",
+   "fieldname": "dominant_threshold",
+   "fieldtype": "Float",
+   "label": "Dominant Threshold Lead (%)"
+  },
+  {
+   "default": "5.0",
+   "fieldname": "differentiation_threshold",
+   "fieldtype": "Float",
+   "label": "Low Differentiation Threshold (%)"
+  },
+  {
+   "default": "1",
+   "fieldname": "version",
+   "fieldtype": "Int",
+   "label": "Version Configuration"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-20 08:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Nexedu",
+ "name": "Psychometric Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
