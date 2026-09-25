@@ -26,6 +26,7 @@
 #  17. get_student_dashboard                (student)
 #  18. recalculate_fit_scores               (student)
 #  19. get_completed_paths                   (student)
+#  20. get_path_quota_status                (student)   ← NEW: quota info for UI gating
 # ─────────────────────────────────────────────────────────────────────────────
 
 import frappe
@@ -289,7 +290,21 @@ def enroll_student(student, career_path, force_enroll=0, path_generation_mode=No
     unless AI roadmap generation is requested (via path_generation_mode='AI' or roadmap_source='AI'),
     in which case personalized milestones are generated via RoadmapAgent.
 
-    Returns: { status: "success"|"already_enrolled", enrollment: <name> }
+    QUOTA GATE (activate_skill_path):
+    Each time a student activates a NEW path (or switches to a different one), one
+    quota credit for the 'activate_skill_path' feature is consumed from the billing
+    platform.  Re-activating the exact same path that is already Active is free
+    (returns early with "already_enrolled").  Re-activating a Paused enrollment on
+    the same path also consumes a credit because it is a deliberate path switch.
+
+    If the quota is exhausted the endpoint returns:
+        { "status": "quota_exceeded",
+          "quota_remaining": 0,
+          "message": "<human-readable reason>" }
+    so the frontend can show an upgrade prompt without an unhandled exception.
+
+    Returns: { status: "success"|"already_enrolled"|"generating"|"quota_exceeded",
+               enrollment: <name> }
     """
     existing_active = frappe.db.exists(
         "Student Path Enrollment",
@@ -304,6 +319,16 @@ def enroll_student(student, career_path, force_enroll=0, path_generation_mode=No
     )
     if existing_generating:
         return {"status": "generating", "enrollment": existing_generating}
+
+    # ── QUOTA GATE ────────────────────────────────────────────────────────────
+    session_user = frappe.session.user
+    is_admin = session_user in ("Administrator",) or "System Manager" in frappe.get_roles(session_user)
+    
+    if not is_admin:
+        quota_check = _enforce_path_quota(session_user, student)
+        if quota_check and quota_check.get("status") == "quota_exceeded":
+            return quota_check
+    # ─────────────────────────────────────────────────────────────────────────
 
     # Clean up any paused failed enrollments (paused with no milestones)
     existing_paused = frappe.db.exists(
@@ -354,12 +379,16 @@ def enroll_student(student, career_path, force_enroll=0, path_generation_mode=No
             try:
                 from job_search_ai.tasks import personalize_enrollment_from_template
                 personalize_enrollment_from_template(doc)
-                
+
                 from nexedu.path_finder.utils.milestone_engine import recalculate_all_milestones
                 recalculate_all_milestones(doc)
 
                 doc.insert(ignore_permissions=True)
                 frappe.db.commit()
+                
+                if not is_admin:
+                    _consume_path_quota(session_user, student)
+                    
                 return {"status": "success", "enrollment": doc.name}
             except Exception as e:
                 frappe.log_error(f"Sync template personalization failed for {career_path}: {str(e)}")
@@ -379,6 +408,9 @@ def enroll_student(student, career_path, force_enroll=0, path_generation_mode=No
         })
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
+        
+        if not is_admin:
+            _consume_path_quota(session_user, student)
 
         frappe.enqueue(
             "job_search_ai.tasks.generate_personalized_roadmap",
@@ -405,8 +437,125 @@ def enroll_student(student, career_path, force_enroll=0, path_generation_mode=No
     doc = frappe.get_doc(doc_data)
     doc.insert(ignore_permissions=True)
     frappe.db.commit()
+    
+    if not is_admin:
+        _consume_path_quota(session_user, student)
 
     return {"status": "success", "enrollment": doc.name}
+
+
+# ── Internal helper: path-activation quota handlers ───────────────────────────
+
+_PATH_FEATURE_CODE = "SKILL_CAREER_PATH"
+
+def _resolve_user_email(session_user, student):
+    user_email = session_user
+    if not user_email or user_email == "Guest":
+        if student:
+            user_email = frappe.db.get_value("Student", student, "email_id") or student
+        else:
+            frappe.throw("Authentication required.", frappe.AuthenticationError)
+    return user_email
+
+def _get_path_quota_row(user_email: str):
+    feature_name = frappe.db.get_value(
+        "Application Features",
+        {"feature_code": _PATH_FEATURE_CODE},
+        "name"
+    )
+    if not feature_name:
+        return None
+
+    rows = frappe.db.get_all(
+        "User Quota Tracker",
+        filters={
+            "parent": user_email,
+            "parenttype": "Billing Account Master",
+            "feature": feature_name
+        },
+        fields=["name", "total_limit", "used_count", "reset_frequency", "last_reset_date"],
+        limit=1
+    )
+    return rows[0] if rows else None
+
+def _enforce_path_quota(session_user: str, student: str):
+    """
+    Checks if the student has remaining path-activation quota.
+
+    FAIL-OPEN: If the SKILL_CAREER_PATH Application Feature does not exist, or
+    if the student has no User Quota Tracker row for this feature (i.e. their
+    billing package was not configured), we allow the enrollment freely.
+    This prevents a billing misconfiguration from blocking all enrollments.
+
+    Returns:
+        { "status": "success" }         — quota available OR fail-open
+        { "status": "quota_exceeded" }  — limit explicitly reached
+    """
+    user_email = _resolve_user_email(session_user, student)
+
+    try:
+        from quantbit_billing_platform.quantbit_billing_platform.api import evaluate_and_reset_cycles
+        evaluate_and_reset_cycles(user_email)
+    except Exception:
+        # If the billing platform module is missing/broken, fail open (don't block enrollment)
+        frappe.log_error(title="Path Quota – evaluate_and_reset_cycles failed", message=frappe.get_traceback())
+        return {"status": "success"}
+
+    row = _get_path_quota_row(user_email)
+
+    # No quota row means the feature isn't configured for this user — allow freely
+    # (mirrors _enforce_skill_add_quota behaviour in student_skill.py)
+    if not row:
+        return {"status": "success"}
+
+    # total_limit == 0 means Unlimited (Advance/Max package)
+    if row.total_limit == 0:
+        return {"status": "success"}
+
+    if row.used_count >= row.total_limit:
+        days_left = _days_until_reset(row.last_reset_date)
+        renewal_hint = (
+            f" Your quota resets in {days_left} day(s)."
+            if days_left > 0
+            else " Please upgrade your plan for more activations."
+        )
+        return {
+            "status": "quota_exceeded",
+            "quota_remaining": 0,
+            "message": (
+                f"You have used all {row.total_limit} path activation(s) allowed by your plan."
+                f"{renewal_hint}"
+            )
+        }
+
+    return {"status": "success"}
+
+def _consume_path_quota(session_user: str, student: str):
+    user_email = _resolve_user_email(session_user, student)
+    feature_name = frappe.db.get_value(
+        "Application Features",
+        {"feature_code": _PATH_FEATURE_CODE},
+        "name"
+    )
+    if not feature_name:
+        return
+
+    frappe.db.sql("""
+        UPDATE `tabUser Quota Tracker`
+        SET used_count = used_count + 1
+        WHERE parent = %s
+          AND parenttype = 'Billing Account Master'
+          AND feature = %s
+          AND (total_limit = 0 OR used_count < total_limit)
+    """, (user_email, feature_name))
+
+def _days_until_reset(last_reset_date) -> int:
+    from frappe.utils import getdate, date_diff, today as frappe_today
+    if not last_reset_date:
+        return 7
+    days_since = date_diff(getdate(frappe_today()), getdate(last_reset_date))
+    remaining = 7 - int(days_since)
+    return max(remaining, 0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1560,4 +1709,92 @@ def get_completed_paths(student):
     return {
         "completed_paths": completed_paths,
         "total_completed" : len(completed_paths),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 20. GET PATH QUOTA STATUS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@frappe.whitelist(allow_guest=True)
+def get_career_path_quota_status(student: str = None):
+    """
+    Returns the student's current quota status for the 'SKILL_CAREER_PATH'
+    feature so the frontend can gate the Activate / Switch Path button.
+    """
+    user_email = frappe.session.user
+    if not user_email or user_email == "Guest":
+        if student:
+            user_email = frappe.db.get_value("Student", student, "email_id") or student
+        else:
+            return {
+                "feature_code"   : _PATH_FEATURE_CODE,
+                "total_limit"    : 0,
+                "used_count"     : 0,
+                "remaining"      : 0,
+                "reset_frequency": "Weekly",
+                "has_quota"      : False,
+                "is_gated"       : True,
+                "message"        : "Authentication required.",
+                "can_add"        : False
+            }
+
+    try:
+        from quantbit_billing_platform.quantbit_billing_platform.api import evaluate_and_reset_cycles
+        evaluate_and_reset_cycles(user_email)
+    except Exception:
+        pass
+
+    row = _get_path_quota_row(user_email)
+
+    if not row:
+        # Feature not configured for this user — treated as unlimited (fail-open)
+        return {
+            "feature_code"   : _PATH_FEATURE_CODE,
+            "total_limit"    : "Unlimited",
+            "used_count"     : 0,
+            "remaining"      : "Unlimited",
+            "reset_frequency": "Weekly",
+            "has_quota"      : True,
+            "is_gated"       : False,
+            "message"        : "Path activation is currently unrestricted.",
+            "can_add"        : True,
+            "days_until_reset": 0
+        }
+
+    if row.total_limit == 0:
+        return {
+            "feature_code"   : _PATH_FEATURE_CODE,
+            "total_limit"    : "Unlimited",
+            "used_count"     : row.used_count,
+            "remaining"      : "Unlimited",
+            "reset_frequency": row.reset_frequency or "Weekly",
+            "has_quota"      : True,
+            "is_gated"       : True,
+            "message"        : "You have unlimited path activations.",
+            "can_add"        : True,
+            "days_until_reset": 0
+        }
+
+    remaining = max(0, row.total_limit - row.used_count)
+    has_quota = remaining > 0
+
+    if has_quota:
+        message = f"You can activate or switch to a path {remaining} more time(s) in this billing cycle."
+    else:
+        freq = row.reset_frequency or "Weekly"
+        renewal_hint = f" Your quota resets {freq.lower()}." if freq != "None" else " Please upgrade your plan to get more activations."
+        message = f"You have used all {row.total_limit} path activation(s) in your plan.{renewal_hint}"
+
+    return {
+        "feature_code"   : _PATH_FEATURE_CODE,
+        "total_limit"    : row.total_limit,
+        "used_count"     : row.used_count,
+        "remaining"      : remaining,
+        "reset_frequency": row.reset_frequency or "Weekly",
+        "has_quota"      : has_quota,
+        "is_gated"       : True,
+        "message"        : message,
+        "can_add"        : has_quota,
+        "days_until_reset": _days_until_reset(row.last_reset_date)
     }

@@ -315,6 +315,15 @@ def enroll_student(student, career_path, force_enroll=0, prereq_paths="[]", path
         path_generation_mode=path_generation_mode,
         roadmap_source=roadmap_source,
     )
+@frappe.whitelist(allow_guest=True)
+def get_career_path_quota_status(student: str = None):
+    """
+    Returns the current SKILL_CAREER_PATH quota status for the student.
+    Delegates to nexedu.path_finder.api.path_enrollment.get_career_path_quota_status.
+    """
+    from nexedu.path_finder.api.path_enrollment import get_career_path_quota_status as get_status_core
+    return get_status_core(student=student)
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
