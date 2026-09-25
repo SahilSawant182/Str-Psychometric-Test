@@ -525,25 +525,30 @@ def get_skill_timeline(student_skill: str):
 
 @frappe.whitelist(allow_guest=True)
 def create_student_skill(data):
+    """
+    Creates a new Student Skill record.
+
+    Enforces the SKILL_ADD weekly quota from the Billing Platform before
+    allowing the record to be inserted.  Administrators bypass the check.
+    """
     try:
         session_user = frappe.session.user
 
-        # ----------------------------------------------------------
-        # PERMISSION CHECK
-        # Controlled by Role Permission Manager
-        # ----------------------------------------------------------
-        # if not frappe.has_permission(
-        #     "Student Skill",
-        #     ptype="create",
-        #     user=session_user
-        # ):
-        #     frappe.throw(
-        #         "You do not have permission to create Student Skill.",
-        #         frappe.PermissionError
-        #     )
-
         if isinstance(data, str):
             data = frappe.parse_json(data)
+
+        # ----------------------------------------------------------
+        # BILLING QUOTA GUARD  (skip for Administrator / System Manager)
+        # ----------------------------------------------------------
+        # Resolve the user email to check against Billing Account Master.
+        # The student field in data may be a Student docname (not email);
+        # we use session_user for the quota check because consume_quota
+        # always operates on frappe.session.user.
+        # ----------------------------------------------------------
+        is_admin = session_user in ("Administrator",) or "System Manager" in frappe.get_roles(session_user)
+
+        if not is_admin:
+            _enforce_skill_add_quota(session_user)
 
         doc = frappe.get_doc({
             "doctype": "Student Skill",
@@ -564,6 +569,12 @@ def create_student_skill(data):
         # Respects Role Permission Manager
         doc.insert()
 
+        # ----------------------------------------------------------
+        # CONSUME THE QUOTA — only after a successful insert
+        # ----------------------------------------------------------
+        if not is_admin:
+            _consume_skill_add_quota(session_user)
+
         frappe.db.commit()
 
         return {
@@ -571,6 +582,10 @@ def create_student_skill(data):
             "message": "Record created successfully",
             "name": doc.name
         }
+
+    except frappe.ValidationError:
+        # Re-raise quota / validation errors so the frontend sees a clear message
+        raise
 
     except Exception as e:
         frappe.log_error(
@@ -606,3 +621,180 @@ def get_employability_score(student: str) -> float:
         frappe.log_error(title="get_employability_score error", message=frappe.get_traceback())
         score = frappe.db.get_value("Student", student, "employability_score")
         return float(score) if score is not None else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Skill Add Quota Helpers
+# ---------------------------------------------------------------------------
+# Feature code registered in Application Features: "SKILL_ADD"
+# Reset frequency: Weekly  (reset every 7 days)
+# Default limit: 2 per week (configured per Billing Package)
+# ---------------------------------------------------------------------------
+
+_SKILL_ADD_FEATURE_CODE = "SKILL_ADD"
+
+
+def _get_skill_add_quota_row(user_email: str):
+    """
+    Returns the User Quota Tracker row dict for SKILL_ADD, or None if
+    the feature is not allocated to this user.
+    """
+    feature_name = frappe.db.get_value(
+        "Application Features",
+        {"feature_code": _SKILL_ADD_FEATURE_CODE},
+        "name"
+    )
+    if not feature_name:
+        return None
+
+    rows = frappe.db.get_all(
+        "User Quota Tracker",
+        filters={
+            "parent": user_email,
+            "parenttype": "Billing Account Master",
+            "feature": feature_name
+        },
+        fields=["name", "total_limit", "used_count", "reset_frequency", "last_reset_date"],
+        limit=1
+    )
+    return rows[0] if rows else None
+
+
+def _enforce_skill_add_quota(user_email: str):
+    """
+    Raises ValidationError if the user has exhausted their weekly SKILL_ADD quota.
+    If the feature is not configured at all, the check is silently skipped
+    (open-access / no billing integration for this user).
+    """
+    # Trigger reset-cycle check first (auto-resets weekly counter if 7+ days passed)
+    try:
+        from quantbit_billing_platform.quantbit_billing_platform.api import evaluate_and_reset_cycles
+        evaluate_and_reset_cycles(user_email)
+    except Exception:
+        frappe.log_error(
+            title="Skill Quota – evaluate_and_reset_cycles failed",
+            message=frappe.get_traceback()
+        )
+
+    row = _get_skill_add_quota_row(user_email)
+
+    # No quota row means the feature isn't configured for this user — allow freely
+    if not row:
+        return
+
+    # total_limit == 0  →  Unlimited (Pro/Max package)
+    if row.total_limit == 0:
+        return
+
+    if row.used_count >= row.total_limit:
+        remaining_days = _days_until_reset(row.last_reset_date)
+        frappe.throw(
+            f"You have reached your weekly skill limit ({row.total_limit} skills/week). "
+            f"Your quota resets in {remaining_days} day(s). "
+            "Upgrade your plan for unlimited skill additions.",
+            frappe.ValidationError
+        )
+
+
+def _consume_skill_add_quota(user_email: str):
+    """
+    Atomically increments the used_count for SKILL_ADD in the user's
+    User Quota Tracker row.  Safe to call only AFTER the doc.insert() succeeds.
+    """
+    feature_name = frappe.db.get_value(
+        "Application Features",
+        {"feature_code": _SKILL_ADD_FEATURE_CODE},
+        "name"
+    )
+    if not feature_name:
+        return
+
+    frappe.db.sql("""
+        UPDATE `tabUser Quota Tracker`
+        SET used_count = used_count + 1
+        WHERE parent = %s
+          AND parenttype = 'Billing Account Master'
+          AND feature = %s
+          AND (total_limit = 0 OR used_count < total_limit)
+    """, (user_email, feature_name))
+    # Note: if ROW_COUNT is 0 here it means the quota was already at limit,
+    # which should not happen because _enforce_skill_add_quota already threw.
+    # We don't throw again here to avoid rolling back an already-committed insert.
+
+
+def _days_until_reset(last_reset_date) -> int:
+    """Calculates how many days remain until the next weekly reset."""
+    from frappe.utils import getdate, date_diff, today as frappe_today
+    if not last_reset_date:
+        return 7
+    days_since = date_diff(getdate(frappe_today()), getdate(last_reset_date))
+    remaining = 7 - int(days_since)
+    return max(remaining, 0)
+
+
+@frappe.whitelist(allow_guest=True)
+def get_skill_quota_status(student: str = None):
+    """
+    Returns the current SKILL_ADD quota status for the logged-in student.
+
+    Response shape:
+    {
+        "feature_code": "SKILL_ADD",
+        "total_limit":  2,         # 0 = Unlimited
+        "used_count":   1,
+        "remaining":    1,         # "Unlimited" when total_limit == 0
+        "reset_frequency": "Weekly",
+        "days_until_reset": 4,
+        "can_add": true
+    }
+    """
+    # Resolve user email — prefer session user, fall back to student email
+    user_email = frappe.session.user
+    if not user_email or user_email == "Guest":
+        if student:
+            user_email = frappe.db.get_value("Student", student, "email_id") or student
+        else:
+            frappe.throw("Authentication required.", frappe.AuthenticationError)
+
+    # Trigger auto-reset before reading so counts are accurate
+    try:
+        from quantbit_billing_platform.quantbit_billing_platform.api import evaluate_and_reset_cycles
+        evaluate_and_reset_cycles(user_email)
+    except Exception:
+        pass
+
+    row = _get_skill_add_quota_row(user_email)
+
+    if not row:
+        # Feature not configured for this user — treated as unlimited
+        return {
+            "feature_code": _SKILL_ADD_FEATURE_CODE,
+            "total_limit": 0,
+            "used_count": 0,
+            "remaining": "Unlimited",
+            "reset_frequency": "Weekly",
+            "days_until_reset": 0,
+            "can_add": True
+        }
+
+    if row.total_limit == 0:
+        return {
+            "feature_code": _SKILL_ADD_FEATURE_CODE,
+            "total_limit": 0,
+            "used_count": row.used_count,
+            "remaining": "Unlimited",
+            "reset_frequency": row.reset_frequency or "Weekly",
+            "days_until_reset": 0,
+            "can_add": True
+        }
+
+    remaining = max(row.total_limit - row.used_count, 0)
+    return {
+        "feature_code": _SKILL_ADD_FEATURE_CODE,
+        "total_limit": row.total_limit,
+        "used_count": row.used_count,
+        "remaining": remaining,
+        "reset_frequency": row.reset_frequency or "Weekly",
+        "days_until_reset": _days_until_reset(row.last_reset_date),
+        "can_add": remaining > 0
+    }
